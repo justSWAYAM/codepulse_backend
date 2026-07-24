@@ -1,0 +1,29 @@
+spring:
+  profiles:
+    active: local
+  application:
+    name: codepulse-backend
+  jackson:
+    default-property-inclusion: non_null
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate     # Flyway owns the schema, Hibernate never auto-generates
+    properties:
+      hibernate:
+        format_sql: true
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+
+server:
+  error:
+    include-message: always
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+logging:
+  level:
+    com.codepulse: DEBUG

@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: codepulse-postgres
+    environment:
+      POSTGRES_DB: codepulse
+      POSTGRES_USER: codepulse
+      POSTGRES_PASSWORD: codepulse_local
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: codepulse-redis
+    ports:
+      - "6379:6379"
+
+volumes:
+  pg_data:

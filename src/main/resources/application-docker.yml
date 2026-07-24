@@ -1,0 +1,17 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://postgres:5432/codepulse
+    username: codepulse
+    password: ${DB_PASSWORD}
+  data:
+    redis:
+      host: redis
+      port: 6379
+
+jwt:
+  secret: ${JWT_SECRET}
+  access-token-expiry-minutes: 15
+  refresh-token-expiry-days: 7
+
+judge0:
+  base-url: http://judge0-server:2358

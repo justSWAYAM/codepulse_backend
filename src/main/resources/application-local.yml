@@ -1,0 +1,24 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/codepulse
+    username: codepulse
+    password: ${DB_PASSWORD:codepulse_local}
+  data:
+    redis:
+      host: localhost
+      port: 6379
+management:
+  endpoint:
+    health:
+      show-details: always
+jwt:
+  secret: ${JWT_SECRET:replace-with-a-real-256-bit-secret-in-.env}
+  access-token-expiry-minutes: 15
+  refresh-token-expiry-days:
+
+logging:
+  pattern:
+    level: "%5p [traceId=%X{traceId}]"
+
+judge0:
+  base-url: http://localhost:2358
