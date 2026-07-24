@@ -1,9 +1,6 @@
-Here is the complete `README.md` formatted inside a raw Markdown block so you can copy and paste it directly into your file without any extra formatting getting in the way.
-
-```markdown
 # CodePulse Backend
 
-CodePulse Backend is a Java & Spring Boot microservice environment integrated with PostgreSQL for data persistence, Redis for caching/state management, and Flyway for automated database schema migrations.
+CodePulse Backend is a Java & Spring Boot backend application integrated with PostgreSQL for data persistence, Redis for caching/state management, and Flyway for automated database schema migrations.
 
 ---
 
@@ -11,31 +8,37 @@ CodePulse Backend is a Java & Spring Boot microservice environment integrated wi
 
 Before getting started, ensure you have the following installed on your machine:
 
-* **Java Development Kit (JDK 21+ or 25)**
-* **Docker & Docker Desktop**
-* **Git**
-* An IDE/Editor: **VS Code** (with *Extension Pack for Java*) or **IntelliJ IDEA**
+- **Java Development Kit (JDK 21+ or 25)**
+- **Docker Desktop** (includes Docker Engine & Docker Compose)
+- **Git**
+- An IDE:
+  - **VS Code** (with the **Extension Pack for Java** and **Spring Boot Extension Pack**), or
+  - **IntelliJ IDEA**
 
 ---
 
-## 🚀 Step-by-Step Setup Guide
+# 🚀 Step-by-Step Setup Guide
 
-### 1. Clone the Repository
+## 1. Clone the Repository
 
 ```bash
-git clone [https://github.com/your-username/codepulse-backend.git](https://github.com/your-username/codepulse-backend.git)
-cd codepulse-backend
+git clone https://github.com/justSWAYAM/codepulse-backend.git
 
+## Dont forget to change directory
+cd codepulse-backend
 ```
 
+> **Note:** Replace the repository URL if you're using your own fork.
+
 ---
 
-### 2. Set Up Environment Files (Before Starting Docker)
+## 2. Set Up Environment Files
 
-Run the following terminal commands to prepare your local configuration files:
+Before starting Docker, create your local environment configuration.
+
+### Create `.env.example`
 
 ```bash
-# Create the environment configuration template (.env.example)
 cat << 'EOF' > .env.example
 DB_HOST=localhost
 DB_PORT=5432
@@ -45,97 +48,156 @@ DB_PASSWORD=codepulse_local
 JWT_SECRET=your-super-secret-key-at-least-256-bits-long
 JUDGE0_BASE_URL=http://localhost:2358
 EOF
+```
 
-# Copy the template to your active local environment file
+### Copy it to `.env`
+
+```bash
 cp .env.example .env
+```
 
-# Verify that .env is ignored by Git
+### Ensure `.env` is ignored by Git
+
+```bash
 grep -qxF '.env' .gitignore || echo '.env' >> .gitignore
-
 ```
 
 ---
 
-### 3. Launch Docker Containers (PostgreSQL & Redis)
+## 3. Start PostgreSQL & Redis
 
-Start the containerized services in detached mode:
+Launch the required Docker containers.
 
 ```bash
 docker compose up -d
-
 ```
 
-#### Verify Containers are Running:
+### Verify the Containers
 
 ```bash
 docker ps
-
 ```
 
-You should see `codepulse-postgres` (port `5432`) and `codepulse-redis` (port `6379`) active.
+You should see containers similar to:
+
+- `codepulse-postgres` (Port **5432**)
+- `codepulse-redis` (Port **6379**)
 
 ---
 
-### 4. Run the Spring Boot Application
+## 4. Run the Spring Boot Application
 
-#### Option A: Running in VS Code
+### Option A — VS Code
 
-1. Open the project in VS Code.
-2. Install the **Extension Pack for Java** and **Spring Boot Extension Pack**.
-3. Open `CodepulseBackendApplication.java`.
-4. Click **Run** directly above the `main` method (or press `F5`).
-5. *Note:* If running via terminal in VS Code, execute:
+1. Open the project in **VS Code**.
+2. Install:
+   - Extension Pack for Java
+   - Spring Boot Extension Pack
+3. Open:
+
+   ```
+   CodepulseBackendApplication.java
+   ```
+
+4. Click **Run** above the `main()` method, or press **F5**.
+
+Alternatively, run from the integrated terminal:
+
 ```bash
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=local
-
 ```
 
+---
 
+### Option B — IntelliJ IDEA
 
-#### Option B: Running in IntelliJ IDEA
+1. Open the project.
+2. Navigate to:
 
-1. Open the project in IntelliJ.
-2. Go to **Run** $\rightarrow$ **Edit Configurations...**
-3. Select `CodepulseBackendApplication`.
-4. Add `-Dspring.profiles.active=local` under **VM Options**.
+   ```
+   Run → Edit Configurations...
+   ```
+
+3. Select **CodepulseBackendApplication**.
+4. Under **VM Options**, add:
+
+```text
+-Dspring.profiles.active=local
+```
+
 5. Click **Run** (`Shift + F10`).
 
 ---
 
-## 🔍 Health Checks & API Documentation
+# 🔍 Verify the Application
 
-Once the app has booted, verify setup via these URLs:
+After the application starts successfully, verify everything is working.
 
-* **Health Endpoint:** [http://localhost:8080/actuator/health](http://localhost:8080/actuator/health) *(Expected: `"status": "UP"`)*
-* **Swagger UI:** [http://localhost:8080/swagger-ui.html](http://localhost:8080/swagger-ui.html)
+### Health Check
+
+```
+http://localhost:8080/actuator/health
+```
+
+Expected response:
+
+```json
+{
+  "status": "UP"
+}
+```
+
+### Swagger API Documentation
+
+```
+http://localhost:8080/swagger-ui.html
+```
 
 ---
 
-## 🧹 Maintenance & Troubleshooting Commands
+# 🧹 Useful Docker Commands
 
-* **Full Database Volume Reset (Wipe & Re-run Flyway Migrations):**
+## Reset the Database (Delete Volume & Re-run Flyway)
+
 ```bash
 docker compose down -v
 docker compose up -d
-
 ```
 
+---
 
-* **Inspect Postgres Directly inside Docker:**
+## Connect to PostgreSQL
+
 ```bash
 docker exec -it codepulse-postgres psql -U codepulse -d codepulse
-
 ```
 
+---
 
-* **Stop Docker Services:**
+## Stop All Containers
+
 ```bash
 docker compose down
-
 ```
 
+---
 
+# 📁 Project Stack
 
-```
+- **Java**
+- **Spring Boot**
+- **PostgreSQL**
+- **Redis**
+- **Flyway**
+- **Docker**
+- **Maven**
+- **Swagger / OpenAPI**
 
-```
+---
+
+# 📌 Notes
+
+- Never commit your `.env` file.
+- Flyway automatically runs database migrations during application startup.
+- Ensure Docker Desktop is running before executing `docker compose up -d`.
+- The application uses the `local` Spring profile for local development.
