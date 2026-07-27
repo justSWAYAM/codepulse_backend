@@ -30,6 +30,10 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleAccessDenied(AccessDeniedException ex, HttpServletRequest req) {
         return build(HttpStatus.FORBIDDEN, ex.getCode(), ex.getMessage(), req);
     }
+    @ExceptionHandler(UnauthorizedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleUnauthorized(UnauthorizedException ex, HttpServletRequest req) {
+        return build(HttpStatus.UNAUTHORIZED, ex.getCode(), ex.getMessage(), req);
+    }
 
     @ExceptionHandler(InvalidStateException.class)
     public ResponseEntity<ApiResponse<Void>> handleInvalidState(InvalidStateException ex, HttpServletRequest req) {
