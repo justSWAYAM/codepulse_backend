@@ -2,7 +2,7 @@ spring:
   application:
     name: codepulse-backend
   datasource:
-    url: jdbc:postgresql://localhost:5432/codepulse
+    url: jdbc:postgresql://localhost:5433/codepulse
     username: codepulse
     password: ${DB_PASSWORD:codepulse_local}
   data:
@@ -22,6 +22,7 @@ spring:
     baseline-on-migrate: true
 
 server:
+  port: 8081
   error:
     include-message: always
 

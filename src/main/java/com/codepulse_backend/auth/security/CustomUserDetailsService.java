@@ -27,14 +27,15 @@ public class CustomUserDetailsService implements UserDetailsService {
             throw new DisabledException("User account is deactivated");
         }
 
-        return org.springframework.security.core.userdetails.User
-                .withUsername(user.getEmail())
-                .password(user.getPasswordHash())
-                .authorities(List.of(new SimpleGrantedAuthority("ROLE_" + user.getRole().name())))
-                .accountExpired(false)
-                .accountLocked(false)
-                .credentialsExpired(false)
-                .disabled(!user.isActive())
-                .build();
+        return new CustomUserDetails(
+                user.getId(),
+                user.getEmail(),
+                user.getPasswordHash(),
+                user.isActive(),
+                true,
+                true,
+                true,
+                List.of(new SimpleGrantedAuthority("ROLE_" + user.getRole().name()))
+        );
     }
 }

@@ -39,6 +39,7 @@ public class JwtService {
         Map<String, Object> claims = new HashMap<>();
         claims.put("role", user.getRole().name());
         claims.put("userId", user.getId().toString());
+        claims.put("fullName", user.getFullName());
 
         long now = System.currentTimeMillis();
 
@@ -56,6 +57,7 @@ public class JwtService {
 
         return Jwts.builder()
                 .subject(user.getEmail())
+                .id(java.util.UUID.randomUUID().toString())
                 .issuedAt(new Date(now))
                 .expiration(new Date(now + (refreshTokenExpirySeconds * 1000)))
                 .signWith(getSecretKey(refreshTokenSecret))

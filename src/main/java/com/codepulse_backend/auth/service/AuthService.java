@@ -136,7 +136,7 @@ public class AuthService {
         ResponseCookie cookie = ResponseCookie.from("refresh_token", rawToken)
                 .httpOnly(true)
                 .secure(isCookieSecure)
-                .sameSite("Strict")
+                .sameSite("Lax")
                 .path("/api/auth")
                 .maxAge(jwtService.getRefreshTokenExpirySeconds())
                 .build();
