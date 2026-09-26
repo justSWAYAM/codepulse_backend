@@ -1,5 +1,7 @@
 package com.codepulse_backend.common.util;
 
+import com.codepulse_backend.common.dto.CsvImportResult;
+import com.codepulse_backend.common.dto.RowError;
 import com.codepulse_backend.user.dto.BulkImportResult;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
@@ -19,55 +21,100 @@ import java.util.function.Function;
 public class CsvImportService {
 
     /**
-     * Generic CSV processor for bulk imports.
-     *
-     * @param file         The uploaded CSV file.
-     * @param rowMapper    Function to convert a CSVRecord into a typed DTO.
-     * @param rowProcessor Function to save the DTO. Returns an error message if it fails, or null if successful.
-     * @param <T>          The type of the DTO being processed.
-     * @return BulkImportResult summarizing successes and failures.
+     * Generic CSV processor with a shared result type.
      */
-    public <T> BulkImportResult process(
+    public <T> CsvImportResult processGeneric(
             MultipartFile file,
             Function<CSVRecord, T> rowMapper,
             Function<T, String> rowProcessor) {
 
-        List<BulkImportResult.RowError> errors = new ArrayList<>();
+        List<RowError> errors = new ArrayList<>();
         int totalRows = 0;
         int succeededCount = 0;
         int failedCount = 0;
 
         try (InputStream inputStream = file.getInputStream();
              CSVParser parser = CSVParser.parse(
-                     new InputStreamReader(inputStream, StandardCharsets.UTF_8),
-                     CSVFormat.DEFAULT.builder().setHeader().setSkipHeaderRecord(true).build())) {
+                     new InputStreamReader(
+                             inputStream,
+                             StandardCharsets.UTF_8
+                     ),
+                     CSVFormat.DEFAULT.builder()
+                             .setHeader()
+                             .setSkipHeaderRecord(true)
+                             .build())) {
 
             for (CSVRecord record : parser) {
                 totalRows++;
                 int rowNumber = (int) record.getRecordNumber();
 
                 try {
-                    // 1. Map row to DTO
                     T mappedObject = rowMapper.apply(record);
-
-                    // 2. Process/Save DTO
                     String errorMessage = rowProcessor.apply(mappedObject);
 
                     if (errorMessage == null) {
                         succeededCount++;
                     } else {
                         failedCount++;
-                        errors.add(new BulkImportResult.RowError(rowNumber, errorMessage));
+                        errors.add(
+                                new RowError(rowNumber, errorMessage)
+                        );
                     }
                 } catch (Exception e) {
                     failedCount++;
-                    errors.add(new BulkImportResult.RowError(rowNumber, "Format error: " + e.getMessage()));
+                    errors.add(
+                            new RowError(
+                                    rowNumber,
+                                    "Format error: " + e.getMessage()
+                            )
+                    );
                 }
             }
+
         } catch (IOException e) {
-            throw new RuntimeException("Failed to read CSV file: " + e.getMessage());
+            throw new RuntimeException(
+                    "Failed to read CSV file: " + e.getMessage(),
+                    e
+            );
         }
 
-        return new BulkImportResult(totalRows, succeededCount, failedCount, errors);
+        return new CsvImportResult(
+                totalRows,
+                succeededCount,
+                failedCount,
+                errors
+        );
+    }
+
+    /**
+     * Backward-compatible adapter for the existing User Management module.
+     */
+    public <T> BulkImportResult process(
+            MultipartFile file,
+            Function<CSVRecord, T> rowMapper,
+            Function<T, String> rowProcessor) {
+
+        CsvImportResult result = processGeneric(
+                file,
+                rowMapper,
+                rowProcessor
+        );
+
+        List<BulkImportResult.RowError> userErrors =
+                result.errors().stream()
+                        .map(error ->
+                                new BulkImportResult.RowError(
+                                        error.rowNumber(),
+                                        error.reason()
+                                )
+                        )
+                        .toList();
+
+        return new BulkImportResult(
+                result.totalRows(),
+                result.succeededCount(),
+                result.failedCount(),
+                userErrors
+        );
     }
 }

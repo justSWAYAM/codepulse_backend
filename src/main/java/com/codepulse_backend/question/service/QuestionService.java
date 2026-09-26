@@ -22,7 +22,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
-
+import com.codepulse_backend.testcase.dto.TestCaseAdminResponse;
+import com.codepulse_backend.testcase.dto.TestCaseSampleResponse;
+import com.codepulse_backend.testcase.service.TestCaseService;
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -33,6 +35,7 @@ public class QuestionService {
     private final ContestCandidateRepository contestCandidateRepository;
     private final UserRepository userRepository;
     private final AuditService auditService;
+    private final TestCaseService testCaseService;
 
     // ─── Create ───────────────────────────────────────────────────────────────
 
@@ -182,6 +185,9 @@ public class QuestionService {
     // ─── Private Mappers ──────────────────────────────────────────────────────
 
     private QuestionAdminResponse toAdminResponse(Question q) {
+        List<TestCaseAdminResponse> testCases =
+                testCaseService.getAllTestCasesForEmbedding(q.getId());
+
         return new QuestionAdminResponse(
                 q.getId(),
                 q.getContestId(),
@@ -193,11 +199,15 @@ public class QuestionService {
                 q.getMemoryLimitKb(),
                 q.getOrderIndex(),
                 q.getCreatedAt(),
-                q.getCreatedBy()
+                q.getCreatedBy(),
+                testCases
         );
     }
 
     private QuestionCandidateResponse toCandidateResponse(Question q) {
+        List<TestCaseSampleResponse> sampleTestCases =
+                testCaseService.getSampleTestCasesForEmbedding(q.getId());
+
         return new QuestionCandidateResponse(
                 q.getId(),
                 q.getContestId(),
@@ -207,7 +217,8 @@ public class QuestionService {
                 q.getPoints(),
                 q.getTimeLimitMs(),
                 q.getMemoryLimitKb(),
-                q.getOrderIndex()
+                q.getOrderIndex(),
+                sampleTestCases
         );
     }
 

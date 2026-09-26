@@ -1,7 +1,9 @@
 package com.codepulse_backend.question.dto;
 
 import com.codepulse_backend.common.enums.Difficulty;
+import com.codepulse_backend.testcase.dto.TestCaseSampleResponse;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -23,5 +25,6 @@ public record QuestionCandidateResponse(
         int points,
         int timeLimitMs,
         int memoryLimitKb,
-        int orderIndex
+        int orderIndex,
+        List<TestCaseSampleResponse> sampleTestCases
 ) {}

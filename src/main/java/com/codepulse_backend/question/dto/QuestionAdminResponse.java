@@ -1,8 +1,10 @@
 package com.codepulse_backend.question.dto;
 
 import com.codepulse_backend.common.enums.Difficulty;
+import com.codepulse_backend.testcase.dto.TestCaseAdminResponse;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -25,5 +27,6 @@ public record QuestionAdminResponse(
         int memoryLimitKb,
         int orderIndex,
         Instant createdAt,
-        UUID createdBy
+        UUID createdBy,
+        List<TestCaseAdminResponse> testCases
 ) {}
