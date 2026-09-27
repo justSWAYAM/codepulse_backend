@@ -46,6 +46,11 @@ public class UserService {
                 .role(request.role())
                 .passwordHash(passwordEncoder.encode(request.password()))
                 .isActive(true)
+                .year(request.year())
+                .branch(request.branch())
+                .division(request.division())
+                .batch(request.batch())
+                .rollNumber(request.rollNumber())
                 .build();
 
         User savedUser = userRepository.save(user);
@@ -63,6 +68,13 @@ public class UserService {
 
         user.setRole(request.role());
         user.setActive(request.isActive());
+        
+        if (request.fullName() != null) user.setFullName(request.fullName());
+        if (request.year() != null) user.setYear(request.year());
+        if (request.branch() != null) user.setBranch(request.branch());
+        if (request.division() != null) user.setDivision(request.division());
+        if (request.batch() != null) user.setBatch(request.batch());
+        if (request.rollNumber() != null) user.setRollNumber(request.rollNumber());
 
         User updatedUser = userRepository.save(user);
 
@@ -154,11 +166,26 @@ public class UserService {
                     if (record.size() < 4) {
                         throw new IllegalArgumentException("Expected at least 4 columns (Email, FullName, Role, Password)");
                     }
+                    Integer year = null;
+                    String branch = null;
+                    String division = null;
+                    String batch = null;
+                    String rollNumber = null;
+
+                    if (record.size() >= 5 && !record.get(4).trim().isEmpty()) {
+                        try { year = Integer.parseInt(record.get(4).trim()); } catch(Exception ignored) {}
+                    }
+                    if (record.size() >= 6) branch = record.get(5).trim().isEmpty() ? null : record.get(5).trim();
+                    if (record.size() >= 7) division = record.get(6).trim().isEmpty() ? null : record.get(6).trim();
+                    if (record.size() >= 8) batch = record.get(7).trim().isEmpty() ? null : record.get(7).trim();
+                    if (record.size() >= 9) rollNumber = record.get(8).trim().isEmpty() ? null : record.get(8).trim();
+
                     return new CreateUserRequest(
                             record.get(0).trim(),
                             record.get(1).trim(),
                             Role.valueOf(record.get(2).trim().toUpperCase()),
-                            record.get(3).trim()
+                            record.get(3).trim(),
+                            year, branch, division, batch, rollNumber
                     );
                 },
                 (CreateUserRequest request) -> {
@@ -196,7 +223,12 @@ public class UserService {
                 user.getFullName(),
                 user.getRole(),
                 user.isActive(),
-                user.getCreatedAt()
+                user.getCreatedAt(),
+                user.getRollNumber(),
+                user.getYear(),
+                user.getBranch(),
+                user.getDivision(),
+                user.getBatch()
         );
     }
 }

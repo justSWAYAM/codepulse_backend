@@ -10,5 +10,10 @@ public record UserSummaryResponse(
         String fullName,
         Role role,
         Boolean isActive,
-        Instant createdAt
+        Instant createdAt,
+        String rollNumber,
+        Integer year,
+        String branch,
+        String division,
+        String batch
 ) {}

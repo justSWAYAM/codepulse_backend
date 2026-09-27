@@ -34,6 +34,18 @@ public class User extends BaseEntity {
     @Column(name = "roll_number", unique = true, length = 50)
     private String rollNumber;
 
+    @Column(name = "academic_year")
+    private Integer year;
+
+    @Column(length = 10)
+    private String branch;
+
+    @Column(length = 5)
+    private String division;
+
+    @Column(length = 5)
+    private String batch;
+
     @Column(name = "is_active", nullable = false)
     private boolean isActive = true;
 }

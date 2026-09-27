@@ -1,0 +1,11 @@
+Email,Name,Role,Password,Year,Branch,Division,Batch,RollNumber
+student1@example.com,Alice Smith,CANDIDATE,SecurePass123!,1,CSE,A,A,10001
+student2@example.com,Bob Johnson,CANDIDATE,SecurePass123!,2,CE,B,B,10002
+student3@example.com,Charlie Brown,CANDIDATE,SecurePass123!,3,ECS,,C,10003
+student4@example.com,Diana Prince,CANDIDATE,SecurePass123!,4,MECH,,D,10004
+student5@example.com,Ethan Hunt,CANDIDATE,SecurePass123!,1,CSE,B,A,10005
+student6@example.com,Fiona Gallagher,CANDIDATE,SecurePass123!,2,CE,C,B,10006
+student7@example.com,George Lucas,CANDIDATE,SecurePass123!,3,ECS,,C,10007
+student8@example.com,Hannah Montana,CANDIDATE,SecurePass123!,4,MECH,,D,10008
+student9@example.com,Ian Malcolm,CANDIDATE,SecurePass123!,1,CSE,C,A,10009
+student10@example.com,Julia Roberts,CANDIDATE,SecurePass123!,2,CE,A,B,10010

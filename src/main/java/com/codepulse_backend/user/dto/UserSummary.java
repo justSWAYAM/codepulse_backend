@@ -10,7 +10,11 @@ public record UserSummary(
         String email,
         String fullName,
         Role role,
-        String rollNumber
+        String rollNumber,
+        Integer year,
+        String branch,
+        String division,
+        String batch
 ) {
     public static UserSummary from(User user) {
         return new UserSummary(
@@ -18,7 +22,11 @@ public record UserSummary(
                 user.getEmail(),
                 user.getFullName(),
                 user.getRole(),
-                user.getRollNumber()
+                user.getRollNumber(),
+                user.getYear(),
+                user.getBranch(),
+                user.getDivision(),
+                user.getBatch()
         );
     }
 }

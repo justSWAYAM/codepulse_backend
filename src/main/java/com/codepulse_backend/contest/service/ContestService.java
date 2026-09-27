@@ -300,7 +300,12 @@ public class ContestService {
                 user.getFullName(),
                 user.getRole(),
                 user.isActive(),
-                user.getCreatedAt()
+                user.getCreatedAt(),
+                user.getRollNumber(),
+                user.getYear(),
+                user.getBranch(),
+                user.getDivision(),
+                user.getBatch()
         );
     }
 }
