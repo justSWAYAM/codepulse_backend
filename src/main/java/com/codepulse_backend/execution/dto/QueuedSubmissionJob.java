@@ -15,6 +15,7 @@ public record QueuedSubmissionJob(
     public record TestCasePayload(
             UUID testCaseId,
             String input,
+            String expectedOutput,
             long timeLimitMs,
             long memoryLimitKb
     ) {}

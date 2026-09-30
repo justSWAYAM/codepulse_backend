@@ -2,22 +2,30 @@ package com.codepulse_backend.execution;
 
 import com.codepulse_backend.execution.dto.QueuedSubmissionJob;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.redis.core.RedisTemplate;
 
 import java.util.List;
 import java.util.UUID;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.Mockito.*;
 
-@SpringBootTest
 class SubmissionQueueServiceTest {
 
-    @Autowired
-    private SubmissionQueueService submissionQueueService;
-
     @Test
-    void shouldPushAndPopJob() {
+    void shouldPushJobToQueue() {
+
+        RedisTemplate<String, Object> redisTemplate =
+                mock(RedisTemplate.class);
+
+        var listOperations =
+                mock(org.springframework.data.redis.core.ListOperations.class);
+
+        when(redisTemplate.opsForList())
+                .thenReturn(listOperations);
+
+        SubmissionQueueService queueService =
+                new SubmissionQueueService(redisTemplate);
 
         QueuedSubmissionJob job =
                 new QueuedSubmissionJob(
@@ -30,40 +38,67 @@ class SubmissionQueueServiceTest {
                                 new QueuedSubmissionJob.TestCasePayload(
                                         UUID.randomUUID(),
                                         "input-1",
+                                        "expected output 1",
                                         5000,
                                         256000
                                 ),
                                 new QueuedSubmissionJob.TestCasePayload(
                                         UUID.randomUUID(),
                                         "input-2",
+                                        "expected output 2",
                                         5000,
                                         256000
                                 )
                         )
                 );
 
-        long initialSize = submissionQueueService.size();
+        queueService.push(job);
 
-        submissionQueueService.push(job);
+        verify(listOperations)
+                .rightPush("codepulse:execution:queue", job);
+    }
 
-        assertEquals(
-                initialSize + 1,
-                submissionQueueService.size()
-        );
+    @Test
+    void shouldPopJobFromQueue() {
 
-        Object popped = submissionQueueService.pop();
+        RedisTemplate<String, Object> redisTemplate =
+                mock(RedisTemplate.class);
 
-        assertNotNull(popped);
-        assertInstanceOf(QueuedSubmissionJob.class, popped);
+        var listOperations =
+                mock(org.springframework.data.redis.core.ListOperations.class);
 
-        QueuedSubmissionJob result =
-                (QueuedSubmissionJob) popped;
+        when(redisTemplate.opsForList())
+                .thenReturn(listOperations);
 
-        assertEquals(job.submissionId(), result.submissionId());
-        assertEquals(job.questionId(), result.questionId());
-        assertEquals(job.sessionId(), result.sessionId());
-        assertEquals(job.sourceCode(), result.sourceCode());
-        assertEquals(job.languageName(), result.languageName());
-        assertEquals(job.testCases(), result.testCases());
+        SubmissionQueueService queueService =
+                new SubmissionQueueService(redisTemplate);
+
+        QueuedSubmissionJob job =
+                new QueuedSubmissionJob(
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        "print(\"hello\")",
+                        "PYTHON",
+                        List.of(
+                                new QueuedSubmissionJob.TestCasePayload(
+                                        UUID.randomUUID(),
+                                        "input-1",
+                                        "expected output 1",
+                                        5000,
+                                        256000
+                                )
+                        )
+                );
+
+        when(listOperations.leftPop("codepulse:execution:queue"))
+                .thenReturn(job);
+
+        Object result = queueService.pop();
+
+        assertEquals(job, result);
+
+        verify(listOperations)
+                .leftPop("codepulse:execution:queue");
     }
 }

@@ -45,6 +45,7 @@ class ExecutionWorkerTest {
                                 new QueuedSubmissionJob.TestCasePayload(
                                         testCaseId,
                                         "",
+                                        "expected output",
                                         5000,
                                         256000
                                 )
@@ -143,12 +144,14 @@ class ExecutionWorkerTest {
                                 new QueuedSubmissionJob.TestCasePayload(
                                         testCaseId1,
                                         "input-1",
+                                        "expected output 1",
                                         5000,
                                         256000
                                 ),
                                 new QueuedSubmissionJob.TestCasePayload(
                                         testCaseId2,
                                         "input-2",
+                                        "expected output 2",
                                         5000,
                                         256000
                                 )

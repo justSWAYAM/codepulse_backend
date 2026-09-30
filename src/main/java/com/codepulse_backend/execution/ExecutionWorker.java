@@ -58,6 +58,7 @@ public class ExecutionWorker {
                                         job.sourceCode(),
                                         job.languageName(),
                                         testCase.input(),
+                                        testCase.expectedOutput(),
                                         testCase.timeLimitMs(),
                                         testCase.memoryLimitKb()
                                 )

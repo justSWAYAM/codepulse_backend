@@ -1,6 +1,7 @@
 package com.codepulse_backend;
 
 import com.codepulse_backend.config.Judge0Properties;
+import com.codepulse_backend.config.SubmissionProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -10,7 +11,10 @@ import java.util.TimeZone;
 
 @SpringBootApplication
 @EnableScheduling
-@EnableConfigurationProperties(Judge0Properties.class)
+@EnableConfigurationProperties({
+        Judge0Properties.class,
+        SubmissionProperties.class
+})
 public class CodepulseBackendApplication {
 
     public static void main(String[] args) {

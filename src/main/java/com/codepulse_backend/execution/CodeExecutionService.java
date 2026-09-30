@@ -36,7 +36,8 @@ public class CodeExecutionService {
                             language.getJudge0LanguageId(),
                             request.stdin(),
                             request.timeLimitMs() / 1000.0,
-                            request.memoryLimitKb()
+                            request.memoryLimitKb(),
+                            request.expectedOutput()
                     );
 
             String token =
@@ -45,7 +46,10 @@ public class CodeExecutionService {
             Judge0StatusResponse result =
                     judge0ClientService.pollResult(token);
 
-            return mapToExecutionResult(result);
+            return mapToExecutionResult(
+                    result,
+                    request.languageName()
+            );
 
         } catch (Judge0IntegrationException e) {
             return new ExecutionResult(
@@ -60,34 +64,53 @@ public class CodeExecutionService {
     }
 
     private ExecutionResult mapToExecutionResult(
-            Judge0StatusResponse response
+            Judge0StatusResponse response,
+            String languageName
     ) {
 
         int statusId = response.status().id();
 
-        TestCaseResultStatus status = switch (statusId) {
+        TestCaseResultStatus status;
 
-            case 3 ->
-                    TestCaseResultStatus.PASSED;
+        /*
+         * Judge0 1.13.1 reports Python syntax errors as
+         * Runtime Error (11 / NZEC) instead of Compilation Error (6).
+         *
+         * Normalize clear Python syntax/indentation errors so that
+         * the application exposes the status required by Module 8.
+         */
+        if (statusId == 11
+                && "PYTHON".equalsIgnoreCase(languageName)
+                && isPythonSyntaxError(response.stderr())) {
 
-            case 4 ->
-                    TestCaseResultStatus.WRONG_ANSWER;
+            status = TestCaseResultStatus.COMPILATION_ERROR;
 
-            case 5 ->
-                    TestCaseResultStatus.TIME_LIMIT_EXCEEDED;
+        } else {
 
-            case 6 ->
-                    TestCaseResultStatus.COMPILATION_ERROR;
+            status = switch (statusId) {
 
-            case 15 ->
-                    TestCaseResultStatus.MEMORY_LIMIT_EXCEEDED;
+                case 3 ->
+                        TestCaseResultStatus.PASSED;
 
-            case 7, 8, 9, 10, 11, 12, 14 ->
-                    TestCaseResultStatus.RUNTIME_ERROR;
+                case 4 ->
+                        TestCaseResultStatus.WRONG_ANSWER;
 
-            default ->
-                    TestCaseResultStatus.SYSTEM_ERROR;
-        };
+                case 5 ->
+                        TestCaseResultStatus.TIME_LIMIT_EXCEEDED;
+
+                case 6 ->
+                        TestCaseResultStatus.COMPILATION_ERROR;
+
+                case 15 ->
+                        TestCaseResultStatus.MEMORY_LIMIT_EXCEEDED;
+
+                case 7, 8, 9, 10, 11, 12, 14 ->
+                        TestCaseResultStatus.RUNTIME_ERROR;
+
+                default ->
+                        TestCaseResultStatus.SYSTEM_ERROR;
+            };
+        }
 
         return new ExecutionResult(
                 status,
@@ -97,6 +120,17 @@ public class CodeExecutionService {
                 convertExecutionTime(response.time()),
                 response.memory()
         );
+    }
+
+    private boolean isPythonSyntaxError(String stderr) {
+
+        if (stderr == null) {
+            return false;
+        }
+
+        return stderr.contains("SyntaxError:")
+                || stderr.contains("IndentationError:")
+                || stderr.contains("TabError:");
     }
 
     private Long convertExecutionTime(String time) {

@@ -9,6 +9,10 @@ spring:
     redis:
       host: localhost
       port: 6379
+  task:
+    scheduling:
+      pool:
+        size: 4
 
   jpa:
     open-in-view: false

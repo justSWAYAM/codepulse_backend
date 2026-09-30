@@ -15,5 +15,8 @@ public record Judge0SubmissionRequest(
         double cpuTimeLimit,
 
         @JsonProperty("memory_limit")
-        long memoryLimit
+        long memoryLimit, // Added the missing comma here
+
+        @JsonProperty("expected_output")
+        String expectedOutput // Added the field type and name here
 ) {}

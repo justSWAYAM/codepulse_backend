@@ -196,6 +196,7 @@ class CodeExecutionServiceTest {
                 "print(\"hello\")",
                 "PYTHON",
                 "",
+                "expected output",
                 5000,
                 256000
         );

@@ -30,6 +30,7 @@ class ExecutionWorkerIntegrationTest {
                                 new QueuedSubmissionJob.TestCasePayload(
                                         UUID.randomUUID(),
                                         "",
+                                        "expected output",
                                         5000,
                                         256000
                                 )

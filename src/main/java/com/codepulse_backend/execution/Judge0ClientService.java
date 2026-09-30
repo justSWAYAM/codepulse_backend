@@ -102,6 +102,10 @@ public class Judge0ClientService {
             }
 
             int statusId = response.status().id();
+            System.out.println(
+                    "JUDGE0 STATUS -> id=" + statusId +
+                            ", description=" + response.status().description()
+            );
 
             if (statusId >= 3) {
                 return response;
