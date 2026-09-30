@@ -1,4 +1,5 @@
 services:
+  # ── Existing application services ─────────────────────────────────────────
   postgres:
     image: postgres:16
     container_name: codepulse-postgres
@@ -17,5 +18,51 @@ services:
     ports:
       - "6379:6379"
 
+  # ── Judge0 CE (self-hosted code execution engine) ─────────────────────────
+  judge0-server:
+    image: judge0/judge0:1.13.1
+    container_name: codepulse-judge0-server
+    ports:
+      - "2358:2358"
+    volumes:
+      - ./judge0.conf:/judge0.conf:ro
+    environment:
+      JUDGE0_CONFIG_FILE: /judge0.conf
+    privileged: true           # required for isolate sandboxing
+    restart: always
+    depends_on:
+      - judge0-db
+      - judge0-redis
+
+  judge0-worker:
+    image: judge0/judge0:1.13.1
+    container_name: codepulse-judge0-worker
+    command: ["./scripts/workers"]
+    volumes:
+      - ./judge0.conf:/judge0.conf:ro
+    environment:
+      JUDGE0_CONFIG_FILE: /judge0.conf
+    privileged: true
+    restart: always
+    depends_on:
+      - judge0-db
+      - judge0-redis
+
+  judge0-db:
+    image: postgres:16
+    container_name: codepulse-judge0-db
+    environment:
+      POSTGRES_DB: judge0
+      POSTGRES_USER: judge0
+      POSTGRES_PASSWORD: judge0local
+    volumes:
+      - judge0_pg_data:/var/lib/postgresql/data
+
+  judge0-redis:
+    image: redis:7-alpine
+    container_name: codepulse-judge0-redis
+    # NOT exposed on host — only reachable within the Docker network
+
 volumes:
   pg_data:
+  judge0_pg_data:
