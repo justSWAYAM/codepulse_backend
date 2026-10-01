@@ -39,6 +39,7 @@ public class ContestService {
     private final ContestCandidateRepository contestCandidateRepository;
     private final UserRepository userRepository;
     private final AuditService auditService;
+    private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     // ─── Create ───────────────────────────────────────────────────────────────
 
@@ -127,9 +128,13 @@ public class ContestService {
 
         if (currentUser.getRole() == Role.CANDIDATE) {
             // Candidates see only their assigned contests (PUBLISHED + ONGOING only by default)
-            List<ContestStatus> visibleStatuses = statusFilter != null
-                    ? List.of(statusFilter)
-                    : List.of(ContestStatus.PUBLISHED, ContestStatus.ONGOING);
+            // DRAFT contests are never visible to candidates, even if explicitly requested
+            List<ContestStatus> visibleStatuses = statusFilter == null
+                    ? List.of(ContestStatus.PUBLISHED, ContestStatus.ONGOING)
+                    : statusFilter == ContestStatus.DRAFT ? List.of() : List.of(statusFilter);
+            if (visibleStatuses.isEmpty()) {
+                return new PagedResponse<>(List.of(), pageable.getPageNumber(), pageable.getPageSize(), 0, 0);
+            }
             page = contestRepository.findAllByCandidateIdAndStatusIn(
                     currentUser.getId(), visibleStatuses, pageable);
         } else {
@@ -160,6 +165,9 @@ public class ContestService {
                     .existsByContestIdAndCandidateId(id, currentUser.getId());
             if (!isAssigned) {
                 throw new AccessDeniedException("You are not assigned to this contest");
+            }
+            if (contest.getStatus() == ContestStatus.DRAFT) {
+                throw new ResourceNotFoundException("Contest not found with id: " + id);
             }
         }
 
@@ -261,6 +269,7 @@ public class ContestService {
     public void transitionToCompleted(Contest contest) {
         contest.setStatus(ContestStatus.COMPLETED);
         contestRepository.save(contest);
+        eventPublisher.publishEvent(new com.codepulse_backend.contest.event.ContestCompletedEvent(contest.getId()));
     }
 
     // ─── Private Helpers ──────────────────────────────────────────────────────

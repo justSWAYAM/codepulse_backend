@@ -1,6 +1,7 @@
 package com.codepulse_backend.session;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -9,6 +10,7 @@ import java.time.Instant;
 
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class SessionAutoSubmitScheduler {
 
     private final AssessmentSessionRepository sessionRepository;
@@ -26,7 +28,12 @@ public class SessionAutoSubmitScheduler {
                 );
 
         for (AssessmentSession session : expiredSessions) {
-            sessionService.autoSubmitExpiredSession(session.getId());
+            // One bad row must not stop the rest of the batch from being finalized
+            try {
+                sessionService.autoSubmitExpiredSession(session.getId());
+            } catch (RuntimeException e) {
+                log.error("Failed to auto-submit expired session [{}]", session.getId(), e);
+            }
         }
     }
 }

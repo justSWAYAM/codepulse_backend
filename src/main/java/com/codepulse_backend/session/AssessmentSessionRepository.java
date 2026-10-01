@@ -19,6 +19,23 @@ public interface AssessmentSessionRepository
             UUID candidateId
     );
 
+    /**
+     * Locking variant used by start/submit so the row is read under the lock
+     * (loading it unlocked first and locking afterwards returns the stale
+     * cached instance, racing the auto-submit scheduler).
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+        SELECT s
+        FROM AssessmentSession s
+        WHERE s.contestId = :contestId
+          AND s.candidateId = :candidateId
+        """)
+    Optional<AssessmentSession> findByContestIdAndCandidateIdForUpdate(
+            @Param("contestId") UUID contestId,
+            @Param("candidateId") UUID candidateId
+    );
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
         SELECT s

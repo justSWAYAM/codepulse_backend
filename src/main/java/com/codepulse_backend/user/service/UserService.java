@@ -11,6 +11,8 @@ import com.codepulse_backend.user.User;
 import com.codepulse_backend.user.dto.*;
 import com.codepulse_backend.user.repository.UserRepository;
 import com.codepulse_backend.user.repository.UserSpecification;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.Validator;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.csv.CSVRecord;
 import org.springframework.data.domain.Page;
@@ -22,7 +24,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -33,11 +37,15 @@ public class UserService {
     private final PasswordEncoder passwordEncoder;
     private final AuditService auditService;
     private final CsvImportService csvImportService; // Added injection
+    private final Validator validator;
 
     @Transactional
     public UserSummaryResponse createUser(CreateUserRequest request) {
         if (userRepository.existsByEmail(request.email())) {
             throw new DuplicateResourceException("User with email " + request.email() + " already exists");
+        }
+        if (request.rollNumber() != null && userRepository.existsByRollNumber(request.rollNumber())) {
+            throw new DuplicateResourceException("User with roll number " + request.rollNumber() + " already exists");
         }
 
         User user = User.builder()
@@ -74,7 +82,12 @@ public class UserService {
         if (request.branch() != null) user.setBranch(request.branch());
         if (request.division() != null) user.setDivision(request.division());
         if (request.batch() != null) user.setBatch(request.batch());
-        if (request.rollNumber() != null) user.setRollNumber(request.rollNumber());
+        if (request.rollNumber() != null && !request.rollNumber().equals(user.getRollNumber())) {
+            if (userRepository.existsByRollNumber(request.rollNumber())) {
+                throw new DuplicateResourceException("User with roll number " + request.rollNumber() + " already exists");
+            }
+            user.setRollNumber(request.rollNumber());
+        }
 
         User updatedUser = userRepository.save(user);
 
@@ -190,11 +203,20 @@ public class UserService {
                 },
                 (CreateUserRequest request) -> {
                     // Process row using our existing validation/creation logic
+                    // CSV rows don't pass through @Valid, so apply the same DTO constraints here
+                    Set<ConstraintViolation<CreateUserRequest>> violations = validator.validate(request);
+                    if (!violations.isEmpty()) {
+                        return violations.stream()
+                                .sorted(Comparator.comparing(v -> v.getPropertyPath().toString()))
+                                .map(v -> v.getPropertyPath() + ": " + v.getMessage())
+                                .reduce((a, b) -> a + "; " + b)
+                                .orElse("Invalid row");
+                    }
                     try {
                         createUser(request);
                         return null; // success
                     } catch (DuplicateResourceException e) {
-                        return "Email already exists: " + request.email();
+                        return e.getMessage();
                     } catch (Exception e) {
                         return e.getMessage();
                     }

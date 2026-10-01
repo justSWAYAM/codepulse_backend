@@ -1,4 +1,4 @@
-package com.codepulse_backend.common.config;
+package com.codepulse_backend.config;
 
 import com.codepulse_backend.auth.security.JwtAuthEntryPoint;
 import com.codepulse_backend.auth.security.JwtAuthenticationFilter;

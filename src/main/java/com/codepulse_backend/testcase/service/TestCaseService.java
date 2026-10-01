@@ -38,6 +38,7 @@ public class TestCaseService {
     private final ContestCandidateRepository contestCandidateRepository;
     private final UserRepository userRepository;
     private final AuditService auditService;
+    private final com.codepulse_backend.session.SessionService sessionService;
 
     // ─── Create ───────────────────────────────────────────────────────────────
 
@@ -144,6 +145,8 @@ public class TestCaseService {
                         "Test cases are only accessible when the contest is ongoing"
                 );
             }
+
+            sessionService.requireActiveSession(contestId, currentUser.getId());
 
             // Candidate path: fetch only sample cases from the database.
             return testCaseRepository
