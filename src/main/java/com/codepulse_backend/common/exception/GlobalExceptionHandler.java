@@ -114,4 +114,16 @@ public class GlobalExceptionHandler {
         String traceId = (String) req.getAttribute("traceId");
         return ResponseEntity.status(status).body(ApiResponse.failure(code + ": " + message, traceId));
     }
+    @ExceptionHandler(SubmissionQueueUnavailableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleSubmissionQueueUnavailable(
+            SubmissionQueueUnavailableException ex,
+            HttpServletRequest req
+    ) {
+        return build(
+                HttpStatus.SERVICE_UNAVAILABLE,
+                ex.getCode(),
+                ex.getMessage(),
+                req
+        );
+    }
 }

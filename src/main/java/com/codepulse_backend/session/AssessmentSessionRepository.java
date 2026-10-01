@@ -55,4 +55,9 @@ public interface AssessmentSessionRepository
             UUID contestId,
             SessionStatus status
     );
+    Optional<AssessmentSession> findByContestIdAndCandidateIdAndStatus(
+            UUID contestId,
+            UUID candidateId,
+            SessionStatus status
+    );
 }
