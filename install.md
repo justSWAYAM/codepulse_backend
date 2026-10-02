@@ -202,3 +202,29 @@ docker compose down
 - Flyway automatically runs database migrations during application startup.
 - Ensure Docker Desktop is running before executing `docker compose up -d`.
 - The application uses the `local` Spring profile for local development.
+
+---
+
+# ⚖️ Judge0 on Windows (Docker Desktop / WSL2)
+
+Judge0 1.13.1 sandboxes code with isolate 1.8.1, which needs **cgroup v1**. Docker Desktop on WSL2 runs **cgroup v2**, so every run comes back as status 13 "Internal Error" and the worker logs `Failed to create control group /sys/fs/cgroup/memory/box-N/`.
+
+Check which one you have:
+
+```bash
+docker info --format '{{.CgroupVersion}}'     # needs to print 1 for Judge0
+```
+
+Fix (Docker Desktop only — does not touch your WSL distros):
+
+1. Quit Docker Desktop.
+2. Back up `%APPDATA%\Docker\settings-store.json`, then add this key to the JSON object:
+   ```json
+   "deprecatedCgroupv1": true
+   ```
+3. Start Docker Desktop, run `docker compose up -d`, and confirm `docker info` now prints `1`.
+4. Smoke test: `curl -s -X POST "http://localhost:2358/submissions?wait=true" -H "Content-Type: application/json" -d '{"source_code":"print(1)","language_id":71,"expected_output":"1"}'` should return `"status":{"id":3,...}`.
+
+To undo, restore the backup and restart Docker Desktop.
+
+Also keep `judge0.conf` with LF line endings (enforced by `.gitattributes`). With CRLF, every value gets a trailing `\r` and Judge0 cannot reach its Redis (`Redis::CannotConnectError ... SocketError`).
