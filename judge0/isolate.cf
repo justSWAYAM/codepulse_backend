@@ -1,0 +1,19 @@
+# isolate 2.2 configuration for the CodePulse Judge0 image.
+
+# All sandboxes are created under this directory (writable only by root).
+box_root = /var/local/lib/isolate
+
+# Lock files, one per box
+lock_root = /run/isolate/locks
+
+# Control group that box cgroups are created under. cgroup-setup.sh creates it
+# at container start and delegates the memory/pids/cpu controllers to it.
+cg_root = /sys/fs/cgroup/isolate
+
+# Block of UIDs and GIDs reserved for sandboxes
+first_uid = 60000
+first_gid = 60000
+
+# Judge0 derives box IDs from submission IDs, so allow the same range as its
+# stock image did
+num_boxes = 2147483647

@@ -205,26 +205,26 @@ docker compose down
 
 ---
 
-# ⚖️ Judge0 on Windows (Docker Desktop / WSL2)
+# ⚖️ Judge0 sandbox (cgroup v2)
 
-Judge0 1.13.1 sandboxes code with isolate 1.8.1, which needs **cgroup v1**. Docker Desktop on WSL2 runs **cgroup v2**, so every run comes back as status 13 "Internal Error" and the worker logs `Failed to create control group /sys/fs/cgroup/memory/box-N/`.
+The stock `judge0/judge0:1.13.1` image sandboxes code with isolate 1.8.1, which only works on **cgroup v1**. Docker Desktop (WSL2) and most current Linux hosts use **cgroup v2**, where every run fails with status 13 "Internal Error".
 
-Check which one you have:
+`docker compose` therefore builds a local image, `codepulse/judge0:1.13.1-isolate2`, from [`judge0/`](judge0/):
+
+- `Dockerfile`: Judge0 1.13.1 with **isolate 2.2** (cgroup v2 support)
+- `cgroup-setup.sh`: on container start, delegates the memory/pids/cpu controllers to `/sys/fs/cgroup/isolate`
+- `isolate-wrapper.sh`: drops `--cg-timing` / `--no-cg-timing`, which Judge0 still sends but isolate 2 removed
+- `isolate.cf`: isolate config (`cg_root = /sys/fs/cgroup/isolate`)
+
+No Docker Desktop, WSL or kernel settings are needed. The first `docker compose up -d` builds the image (a few minutes); after editing anything in `judge0/`, run `docker compose build judge0-worker` and `docker compose up -d`.
+
+Check it works:
 
 ```bash
-docker info --format '{{.CgroupVersion}}'     # needs to print 1 for Judge0
+docker logs codepulse-judge0-worker 2>&1 | grep cgroup-setup     # "isolate cgroup ready"
+curl -s -X POST "http://localhost:2358/submissions?wait=true" -H "Content-Type: application/json"   -d '{"source_code":"print(1)","language_id":71,"expected_output":"1"}'   # "status":{"id":3,...}
 ```
 
-Fix (Docker Desktop only — does not touch your WSL distros):
+To go back to the stock image, set both Judge0 services in `docker-compose.yml` to `image: judge0/judge0:1.13.1` (remove `build:`) and run `docker compose up -d`.
 
-1. Quit Docker Desktop.
-2. Back up `%APPDATA%\Docker\settings-store.json`, then add this key to the JSON object:
-   ```json
-   "deprecatedCgroupv1": true
-   ```
-3. Start Docker Desktop, run `docker compose up -d`, and confirm `docker info` now prints `1`.
-4. Smoke test: `curl -s -X POST "http://localhost:2358/submissions?wait=true" -H "Content-Type: application/json" -d '{"source_code":"print(1)","language_id":71,"expected_output":"1"}'` should return `"status":{"id":3,...}`.
-
-To undo, restore the backup and restart Docker Desktop.
-
-Also keep `judge0.conf` with LF line endings (enforced by `.gitattributes`). With CRLF, every value gets a trailing `\r` and Judge0 cannot reach its Redis (`Redis::CannotConnectError ... SocketError`).
+Keep `judge0.conf` and everything in `judge0/` with LF line endings (enforced by `.gitattributes`). With CRLF, every `judge0.conf` value gets a trailing `` and Judge0 cannot reach its Redis (`Redis::CannotConnectError ... SocketError`).
