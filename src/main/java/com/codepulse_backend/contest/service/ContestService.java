@@ -230,7 +230,9 @@ public class ContestService {
                 contest.getStatus(),
                 candidateCount,
                 contest.getCreatedAt(),
-                candidates
+                candidates,
+                contest.isResultsPublished(),
+                contest.getResultsPublishedAt()
         );
     }
 
@@ -369,7 +371,9 @@ public class ContestService {
                 contest.getAllowedLanguages(),
                 contest.getStatus(),
                 candidateCount,
-                contest.getCreatedAt()
+                contest.getCreatedAt(),
+                contest.isResultsPublished(),
+                contest.getResultsPublishedAt()
         );
     }
 

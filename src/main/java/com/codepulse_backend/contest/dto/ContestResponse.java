@@ -16,5 +16,7 @@ public record ContestResponse(
         List<String> allowedLanguages,
         ContestStatus status,
         long candidateCount,
-        Instant createdAt
+        Instant createdAt,
+        boolean resultsPublished,          // Module 9
+        Instant resultsPublishedAt
 ) {}
