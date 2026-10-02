@@ -12,7 +12,13 @@ Module 10 is a **read-only aggregation layer**. It owns no business state and wr
 
 **Depends on:** Module 0 (Foundation) + Module 1 (Auth) + Module 3 (`contests`, `contest_candidates`) + Module 4 (`questions`, `difficulty`, `points`) + Module 5 (`test_cases`) + Module 6 (`assessment_sessions`) + Module 8 (`submissions`, `submission_test_case_results`) + Module 9 (`results`, `result_question_scores`, `ResultReadinessService`).
 
-**Status:** plan, not yet built (written 2026-10-03 against backend `feature/module-9-results` @ `4f58c75`). Module 10 must be built on top of Module 9.
+**Status:** built on branch `feature/module-10-analytics` (2026-10-03), stacked on `feature/module-9-results`. Plan written against `4f58c75`.
+
+> **As built:**
+> - Every query in §9.2 was run in `psql` first; they are pasted into `AnalyticsRepository` unchanged. The review-reason query adds `COALESCE(NULLIF(review_reasons, ''), '[]')`, so a missing list counts as empty.
+> - `coverage.withResult` is the number of result rows (scored + needs review + absent), taken from Module 9's readiness.
+> - Performance (Step 7): 200 candidates × 3 questions × 3 SUBMITs, best of 3 warm runs: overview 29 ms, questions 26 ms, test cases 30 ms (`AnalyticsPerformanceIntegrationTest`).
+> - The `EXPLAIN ANALYZE` index check on the large seed is still to do. The three V13 indexes are kept until then.
 
 > **Blocker check before any Module 10 code:** Module 9 must be producing one result row per assigned candidate (`SCORED`, `NEEDS_REVIEW` or `ABSENT`). Run the Module 9 browser scenario (one short contest, three candidates) first. It leaves a completed contest whose real data you can check every Module 10 number against. Then run `./mvnw test -DargLine=-Duser.timezone=UTC`; it must be green.
 
