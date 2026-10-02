@@ -23,6 +23,7 @@ class Judge0ClientServiceTest {
                         71,
                         "",
                         5.0,
+                        11.0,
                         256000,
                         "hello world\n" // <--- Added the expectedOutput argument here
                 );

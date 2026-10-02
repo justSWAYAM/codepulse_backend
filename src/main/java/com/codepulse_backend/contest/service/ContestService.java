@@ -78,7 +78,11 @@ public class ContestService {
             throw new InvalidStateException("Only DRAFT contests can be updated. Current status: " + contest.getStatus());
         }
 
-        if (request.title() != null)            contest.setTitle(request.title());
+        if (request.title() != null && request.title().isBlank()) {
+            throw new InvalidStateException("Title must not be blank");
+        }
+
+        if (request.title() != null)            contest.setTitle(request.title().trim());
         if (request.description() != null)      contest.setDescription(request.description());
         if (request.startTime() != null)        contest.setStartTime(request.startTime());
         if (request.endTime() != null)          contest.setEndTime(request.endTime());
@@ -88,6 +92,10 @@ public class ContestService {
         // Re-validate time range if either was changed
         if (!contest.getEndTime().isAfter(contest.getStartTime())) {
             throw new InvalidStateException("End time must be after start time");
+        }
+        if ((request.startTime() != null || request.endTime() != null)
+                && !contest.getStartTime().isAfter(Instant.now())) {
+            throw new InvalidStateException("Start time must be in the future");
         }
 
         return toContestResponse(contestRepository.save(contest));
@@ -107,6 +115,10 @@ public class ContestService {
         long candidateCount = contestCandidateRepository.countByContestId(id);
         if (candidateCount == 0) {
             throw new InvalidStateException("Cannot publish a contest with no candidates assigned");
+        }
+
+        if (!contest.getStartTime().isAfter(Instant.now())) {
+            throw new InvalidStateException("Cannot publish a contest whose start time has passed. Update the schedule first.");
         }
 
         contest.setStatus(ContestStatus.PUBLISHED);
@@ -204,6 +216,10 @@ public class ContestService {
         Contest contest = findContestById(contestId);
         User currentUser = getCurrentAuthenticatedUser();
 
+        if (contest.getStatus() == ContestStatus.COMPLETED) {
+            throw new InvalidStateException("Candidates cannot be assigned to a COMPLETED contest");
+        }
+
         int assignedCount = 0;
         int alreadyAssignedCount = 0;
         int notFoundCount = 0;
@@ -221,10 +237,10 @@ public class ContestService {
 
             User candidate = candidateOpt.get();
 
-            if (candidate.getRole() != Role.CANDIDATE) {
+            if (candidate.getRole() != Role.CANDIDATE || !candidate.isActive()) {
                 notFoundCount++;
                 failedIds.add(candidateId);
-                log.warn("User {} is not a CANDIDATE — skipping assignment", candidateId);
+                log.warn("User {} is not an active CANDIDATE — skipping assignment", candidateId);
                 continue;
             }
 

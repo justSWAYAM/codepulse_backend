@@ -45,8 +45,10 @@ public class Judge0ClientService {
                         .uri(uriBuilder -> uriBuilder
                                 .path("/submissions")
                                 .queryParam("wait", false)
+                                .queryParam("base64_encoded", true)
                                 .build())
-                        .bodyValue(request)
+                        // Base64 keeps non-UTF-8 program output from breaking Judge0's JSON
+                        .bodyValue(request.base64Encoded())
                         .retrieve()
                         .bodyToMono(Map.class)
                         .block();
@@ -83,10 +85,18 @@ public class Judge0ClientService {
     }
 
     public Judge0StatusResponse pollResult(String token) {
+        return pollResult(token, properties.getMaxPollAttempts() * properties.getPollIntervalMs());
+    }
 
-        for (int attempt = 1;
-             attempt <= properties.getMaxPollAttempts();
-             attempt++) {
+    /**
+     * Polls until Judge0 reports a final status or {@code budgetMs} runs out.
+     * The caller sizes the budget from the test case's time limits plus queue time.
+     */
+    public Judge0StatusResponse pollResult(String token, long budgetMs) {
+
+        long deadline = System.currentTimeMillis() + budgetMs;
+
+        while (true) {
 
             Judge0StatusResponse response;
 
@@ -99,6 +109,7 @@ public class Judge0ClientService {
                                         "fields",
                                         "token,status,stdout,stderr,compile_output,time,memory"
                                 )
+                                .queryParam("base64_encoded", true)
                                 .build(token))
                         .retrieve()
                         .bodyToMono(Judge0StatusResponse.class)
@@ -122,7 +133,11 @@ public class Judge0ClientService {
                     token, statusId, response.status().description());
 
             if (statusId >= 3) {
-                return response;
+                return response.base64Decoded();
+            }
+
+            if (System.currentTimeMillis() + properties.getPollIntervalMs() > deadline) {
+                break;
             }
 
             try {

@@ -32,7 +32,7 @@ public class SubmissionProperties {
     @Setter
     public static class RateLimit {
         private boolean enabled = true;
-        private int loginPerMinute = 10;
+        private int loginPerMinute = 60;
         private int runPerMinute = 20;
         private int submitPerMinute = 10;
     }

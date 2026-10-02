@@ -2,7 +2,7 @@ package com.codepulse_backend.submission.service;
 
 import com.codepulse_backend.common.enums.SubmissionStatus;
 import com.codepulse_backend.common.enums.SubmissionType;
-import com.codepulse_backend.common.exception.InvalidStateException;
+import com.codepulse_backend.common.exception.ConflictException;
 import com.codepulse_backend.common.exception.ResourceNotFoundException;
 import com.codepulse_backend.session.AssessmentSessionRepository;
 import com.codepulse_backend.session.SessionStatus;
@@ -46,8 +46,28 @@ public class SubmissionPersistenceService {
             String language,
             String sourceCode,
             int totalCount,
-            Instant now
+            Instant now,
+            int graceSeconds,
+            int maxSubmitPerQuestion
     ) {
+        // Serialises Submits for this session against each other and against finalization
+        var session = sessionRepository.findByIdForUpdate(sessionId)
+                .filter(s -> SubmissionService.acceptsWork(s, graceSeconds, now))
+                .orElseThrow(() -> new ConflictException("NO_ACTIVE_SESSION",
+                        "No active exam session for this contest"));
+
+        if (submissionRepository.existsBySessionIdAndQuestionIdAndSubmissionTypeAndStatus(
+                session.getId(), questionId, SubmissionType.SUBMIT, SubmissionStatus.PENDING)) {
+            throw new ConflictException("SUBMISSION_IN_PROGRESS",
+                    "Your previous submission for this question is still being judged");
+        }
+
+        if (submissionRepository.countBySessionIdAndQuestionIdAndSubmissionType(
+                session.getId(), questionId, SubmissionType.SUBMIT) >= maxSubmitPerQuestion) {
+            throw new ConflictException("SUBMISSION_LIMIT_REACHED",
+                    "Limit of " + maxSubmitPerQuestion + " reached for this question");
+        }
+
         Submission submission = new Submission();
 
         submission.setSessionId(sessionId);
@@ -107,20 +127,25 @@ public class SubmissionPersistenceService {
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void markSystemError(UUID submissionId) {
+    public Optional<SessionScoringCompletedEvent> markSystemError(UUID submissionId) {
 
         Submission submission = submissionRepository
                 .findByIdForUpdate(submissionId)
                 .orElse(null);
 
-        if (submission == null) {
-            return;
+        if (submission == null || submission.getStatus() != SubmissionStatus.PENDING) {
+            return Optional.empty();
         }
 
+        sessionRepository.findByIdForUpdate(submission.getSessionId());
+
         submission.setStatus(SubmissionStatus.SYSTEM_ERROR);
+        submission.setScore(null);
         submission.setEvaluatedAt(Instant.now());
 
         submissionRepository.save(submission);
+
+        return scoringCompletedEvent(submission.getSessionId());
     }
     /**
      * Idempotent: a non-PENDING row is left untouched.
@@ -146,6 +171,9 @@ public class SubmissionPersistenceService {
         if (submission.getStatus() != SubmissionStatus.PENDING) {
             return Optional.empty();
         }
+
+        // Take the session lock before deciding whether scoring is complete (see scoringCompletedEvent)
+        sessionRepository.findByIdForUpdate(submission.getSessionId());
 
         submission.setStatus(status);
         submission.setScore(score);
@@ -190,6 +218,8 @@ public class SubmissionPersistenceService {
             return Optional.empty();
         }
 
+        sessionRepository.findByIdForUpdate(submission.getSessionId());
+
         submission.setStatus(SubmissionStatus.SYSTEM_ERROR);
         submission.setScore(null);
         submission.setEvaluatedAt(now);
@@ -198,6 +228,10 @@ public class SubmissionPersistenceService {
         return scoringCompletedEvent(submission.getSessionId());
     }
 
+    /**
+     * Callers hold the session row lock, as does session finalization, so a finalize
+     * and the last evaluation cannot both miss (or both send) the completion event.
+     */
     private Optional<SessionScoringCompletedEvent> scoringCompletedEvent(UUID sessionId) {
         submissionRepository.flush();
 
@@ -220,7 +254,8 @@ public class SubmissionPersistenceService {
                 .orElseThrow(() -> new ResourceNotFoundException("Submission not found"));
 
         if (submission.getSubmissionType() != SubmissionType.SUBMIT || submission.getStatus() == SubmissionStatus.PENDING) {
-            throw new InvalidStateException("SUBMISSION_NOT_REJUDGEABLE");
+            throw new ConflictException("SUBMISSION_NOT_REJUDGEABLE",
+                    "Only finished SUBMIT submissions can be rejudged");
         }
 
         // Wipe old results and reset state
@@ -228,6 +263,9 @@ public class SubmissionPersistenceService {
 
         submission.setStatus(SubmissionStatus.PENDING);
         submission.setScore(null);
+        submission.setPassedCount(0);
+        submission.setCompileOutput(null);
+        submission.setEvaluatedAt(null);
         submission.setQueueAttempts(1);
         submission.setQueuedAt(Instant.now());
 

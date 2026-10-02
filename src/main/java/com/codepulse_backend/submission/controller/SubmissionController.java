@@ -35,11 +35,7 @@ public class SubmissionController {
     ) {
         UUID candidateId = getCandidateId(authentication);
 
-        var submission = submissionService.run(candidateId, request);
-
-        return ResponseEntity.ok(
-                SubmissionSummaryResponse.from(submission, false)
-        );
+        return ResponseEntity.ok(submissionService.run(candidateId, request).view());
     }
 
     @PostMapping("/api/submissions/submit")

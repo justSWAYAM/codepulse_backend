@@ -88,7 +88,7 @@ class AuthServiceTest {
     void login_correctCredentials_returnsResponseAndSetsCookie() {
         LoginRequest request = new LoginRequest("dev@codepulse.dev", "Password@123");
 
-        when(userRepository.findByEmail("dev@codepulse.dev")).thenReturn(Optional.of(mockUser));
+        when(userRepository.findFirstByEmailIgnoreCase("dev@codepulse.dev")).thenReturn(Optional.of(mockUser));
         when(passwordEncoder.matches("Password@123", "hashed_password")).thenReturn(true);
         when(jwtService.generateAccessToken(mockUser)).thenReturn("access_token_jwt");
         when(jwtService.generateRefreshToken(any(User.class))).thenReturn("raw_refresh_token");
@@ -108,7 +108,7 @@ class AuthServiceTest {
     void login_wrongPassword_throwsUnauthorizedException() {
         LoginRequest request = new LoginRequest("dev@codepulse.dev", "WrongPassword");
 
-        when(userRepository.findByEmail("dev@codepulse.dev")).thenReturn(Optional.of(mockUser));
+        when(userRepository.findFirstByEmailIgnoreCase("dev@codepulse.dev")).thenReturn(Optional.of(mockUser));
         when(passwordEncoder.matches("WrongPassword", "hashed_password")).thenReturn(false);
 
         assertThrows(AppException.class, () -> authService.login(request, httpResponse));
@@ -119,7 +119,7 @@ class AuthServiceTest {
     void login_unknownEmail_throwsUnauthorizedException() {
         LoginRequest request = new LoginRequest("unknown@codepulse.dev", "Password@123");
 
-        when(userRepository.findByEmail("unknown@codepulse.dev")).thenReturn(Optional.empty());
+        when(userRepository.findFirstByEmailIgnoreCase("unknown@codepulse.dev")).thenReturn(Optional.empty());
 
         assertThrows(UnauthorizedException.class, () -> authService.login(request, httpResponse));
     }
@@ -130,7 +130,7 @@ class AuthServiceTest {
         mockUser.setActive(false);
         LoginRequest request = new LoginRequest("dev@codepulse.dev", "Password@123");
 
-        when(userRepository.findByEmail("dev@codepulse.dev")).thenReturn(Optional.of(mockUser));
+        when(userRepository.findFirstByEmailIgnoreCase("dev@codepulse.dev")).thenReturn(Optional.of(mockUser));
         when(passwordEncoder.matches("Password@123", "hashed_password")).thenReturn(true);
 
         assertThrows(DisabledException.class, () -> authService.login(request, httpResponse));

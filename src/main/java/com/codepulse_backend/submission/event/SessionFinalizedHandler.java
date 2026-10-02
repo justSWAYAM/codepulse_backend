@@ -28,7 +28,7 @@ public class SessionFinalizedHandler {
     private final ApplicationEventPublisher publisher;
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void onSessionFinalized(SessionFinalizedEvent event) {
         long pending = submissionRepository.countBySessionIdAndSubmissionTypeAndStatus(
                 event.sessionId(),

@@ -24,6 +24,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -108,6 +109,15 @@ class SubmissionRecoverySchedulerTest {
 
         verify(queueService, never()).push(any());
         verify(publisher).publishEvent(done);
+    }
+
+    @Test
+    void backlogInQueueSkipsRecovery() {
+        when(queueService.size()).thenReturn(4L);
+
+        scheduler.recoverStalePending();
+
+        verify(submissionRepository, never()).findStalePending(any(), any(), anyInt());
     }
 
     private Submission submission() {

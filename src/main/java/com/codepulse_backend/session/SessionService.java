@@ -128,8 +128,10 @@ public class SessionService {
 
         Instant now = Instant.now(clock);
 
+        // Locked read: this may finalize the session, and must not race the
+        // auto-submit scheduler or an explicit submit (double finalize / event)
         Optional<AssessmentSession> optionalSession =
-                sessionRepository.findByContestIdAndCandidateId(
+                sessionRepository.findByContestIdAndCandidateIdForUpdate(
                         contestId,
                         candidate.getId()
                 );

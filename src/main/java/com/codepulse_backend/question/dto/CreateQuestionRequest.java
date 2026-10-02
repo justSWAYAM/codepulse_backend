@@ -28,9 +28,9 @@ public record CreateQuestionRequest(
         int timeLimitMs,
 
         @Min(value = 4096, message = "Memory limit must be at least 4096 KB (4 MB)")
-        @Max(value = 1048576, message = "Memory limit must not exceed 1048576 KB (1 GB)")
+        @Max(value = 512000, message = "Memory limit must not exceed 512000 KB (500 MB), the judge maximum")
         int memoryLimitKb,
 
         // Optional: test cases drafted on the create page, saved together with the question
-        List<@Valid CreateTestCaseRequest> testCases
+        List<@NotNull @Valid CreateTestCaseRequest> testCases
 ) {}

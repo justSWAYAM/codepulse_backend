@@ -75,15 +75,38 @@ class CodeExecutionServiceTest {
     }
 
     @Test
-    void memoryLimitExceeded_shouldReturnMle() {
+    void runtimeErrorAtTheMemoryLimit_shouldReturnMle() {
 
-        mockJudge0Result(15, "Memory Limit Exceeded", null);
+        // Judge0 1.13 reports OOM as a runtime error; memory used is ~ the 256000 KB limit
+        mockJudge0Result(11, "Runtime Error (NZEC)", null, 255_000L, null);
 
         ExecutionResult result = service().execute(request());
 
         assertEquals(
                 TestCaseResultStatus.MEMORY_LIMIT_EXCEEDED,
                 result.status()
+        );
+    }
+
+    @Test
+    void memoryErrorInStderr_shouldReturnMle() {
+
+        mockJudge0Result(11, "Runtime Error (NZEC)", null, 9336L, "MemoryError");
+
+        assertEquals(
+                TestCaseResultStatus.MEMORY_LIMIT_EXCEEDED,
+                service().execute(request()).status()
+        );
+    }
+
+    @Test
+    void execFormatError_shouldReturnSystemError() {
+
+        mockJudge0Result(14, "Exec Format Error", null);
+
+        assertEquals(
+                TestCaseResultStatus.SYSTEM_ERROR,
+                service().execute(request()).status()
         );
     }
 
@@ -153,7 +176,7 @@ class CodeExecutionServiceTest {
         when(judge0ClientService.submitCode(any()))
                 .thenReturn("test-token");
 
-        when(judge0ClientService.pollResult("test-token"))
+        when(judge0ClientService.pollResult(eq("test-token"), anyLong()))
                 .thenReturn(response);
 
         ExecutionResult result = service().execute(request());
@@ -167,14 +190,24 @@ class CodeExecutionServiceTest {
             String description,
             String stdout
     ) {
+        mockJudge0Result(statusId, description, stdout, 9336L, null);
+    }
+
+    private void mockJudge0Result(
+            int statusId,
+            String description,
+            String stdout,
+            Long memory,
+            String stderr
+    ) {
 
         Judge0StatusResponse response =
                 new Judge0StatusResponse(
                         stdout,
-                        null,
+                        stderr,
                         null,
                         "0.068",
-                        9336L,
+                        memory,
                         new Judge0StatusResponse.Judge0Status(
                                 statusId,
                                 description
@@ -184,7 +217,7 @@ class CodeExecutionServiceTest {
         when(judge0ClientService.submitCode(any()))
                 .thenReturn("test-token");
 
-        when(judge0ClientService.pollResult("test-token"))
+        when(judge0ClientService.pollResult(eq("test-token"), anyLong()))
                 .thenReturn(response);
     }
 

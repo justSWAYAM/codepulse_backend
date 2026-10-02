@@ -1,0 +1,5 @@
+
+
+jwt:
+  cookie:
+    secure: true   # refresh cookie only over HTTPS

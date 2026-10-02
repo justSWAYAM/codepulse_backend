@@ -2,3 +2,7 @@
 *.cmd text eol=crlf
 
 
+
+# Sourced by Linux containers (Judge0 load-config): CRLF leaves a trailing  on every value
+*.conf text eol=lf
+*.sh text eol=lf

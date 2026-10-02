@@ -63,7 +63,7 @@ submission:
     max-queue-attempts: 3        # initial push counts as attempt 1
   rate-limit:
     enabled: true
-    login-per-minute: 10         # per client IP
+    login-per-minute: 60         # per client IP (a whole lab can share one NAT address)
     run-per-minute: 20           # per user
     submit-per-minute: 10        # per user
 

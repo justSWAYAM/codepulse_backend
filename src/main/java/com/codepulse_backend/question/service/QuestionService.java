@@ -42,10 +42,7 @@ public class QuestionService {
 
     @Transactional
     public QuestionAdminResponse createQuestion(UUID contestId, CreateQuestionRequest request) {
-        // Verify contest exists
-        if (!contestRepository.existsById(contestId)) {
-            throw new ResourceNotFoundException("Contest not found with id: " + contestId);
-        }
+        assertContestEditable(contestId);
 
         // Compute next order index (append to end)
         int orderIndex = questionRepository.findMaxOrderIndexByContestId(contestId) + 1;
@@ -81,6 +78,7 @@ public class QuestionService {
     @Transactional
     public QuestionAdminResponse updateQuestion(UUID contestId, UUID questionId,
                                                 UpdateQuestionRequest request) {
+        assertContestEditable(contestId);
         Question question = findQuestionInContest(contestId, questionId);
 
         if (request.title() != null)           question.setTitle(request.title());
@@ -97,9 +95,24 @@ public class QuestionService {
 
     @Transactional
     public void deleteQuestion(UUID contestId, UUID questionId) {
+        assertContestEditable(contestId);
         Question question = findQuestionInContest(contestId, questionId);
         questionRepository.delete(question);
         log.info("Question {} deleted from contest {}", questionId, contestId);
+    }
+
+    /**
+     * Questions and test cases are frozen once a contest starts: changing points,
+     * limits or test cases mid-exam would score candidates against different rules.
+     */
+    public void assertContestEditable(UUID contestId) {
+        Contest contest = contestRepository.findById(contestId)
+                .orElseThrow(() -> new ResourceNotFoundException("Contest not found with id: " + contestId));
+
+        if (contest.getStatus() == ContestStatus.ONGOING || contest.getStatus() == ContestStatus.COMPLETED) {
+            throw new InvalidStateException(
+                    "Questions and test cases cannot be changed once a contest is " + contest.getStatus());
+        }
     }
 
     // ─── List ─────────────────────────────────────────────────────────────────
@@ -158,9 +171,7 @@ public class QuestionService {
     @Transactional
     public List<QuestionAdminResponse> reorderQuestions(UUID contestId,
                                                          ReorderQuestionsRequest request) {
-        if (!contestRepository.existsById(contestId)) {
-            throw new ResourceNotFoundException("Contest not found with id: " + contestId);
-        }
+        assertContestEditable(contestId);
 
         List<Question> questions = questionRepository
                 .findAllByIdInAndContestId(request.orderedIds(), contestId);

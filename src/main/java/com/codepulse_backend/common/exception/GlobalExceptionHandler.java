@@ -6,6 +6,8 @@ import com.codepulse_backend.common.dto.ApiResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.InvalidDataAccessApiUsageException;
+import org.springframework.data.core.PropertyReferenceException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -16,7 +18,9 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
 import java.time.Instant;
@@ -60,6 +64,11 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.FORBIDDEN, "ACCOUNT_DISABLED", "Your account has been deactivated. Contact an administrator.", req);
     }
 
+    @ExceptionHandler(ConflictException.class)
+    public ResponseEntity<ApiResponse<Void>> handleConflict(ConflictException ex, HttpServletRequest req) {
+        return build(HttpStatus.CONFLICT, ex.getCode(), ex.getMessage(), req);
+    }
+
     @ExceptionHandler(InvalidStateException.class)
     public ResponseEntity<ApiResponse<Void>> handleInvalidState(InvalidStateException ex, HttpServletRequest req) {
         return build(HttpStatus.UNPROCESSABLE_ENTITY, ex.getCode(), ex.getMessage(), req);
@@ -76,6 +85,23 @@ public class GlobalExceptionHandler {
                 ? "Validation failed"
                 : "Validation failed: " + errors.get(0).field() + " " + errors.get(0).message();
         return ResponseEntity.badRequest().body(new ApiResponse<>(false, error, message, Instant.now(), traceId));
+    }
+
+    @ExceptionHandler(BadRequestException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAppBadRequest(BadRequestException ex, HttpServletRequest req) {
+        return build(HttpStatus.BAD_REQUEST, ex.getCode(), ex.getMessage(), req);
+    }
+
+    // ?sort=unknownField, or a request to an upload endpoint that is not multipart
+    @ExceptionHandler({
+            PropertyReferenceException.class,
+            InvalidDataAccessApiUsageException.class,
+            MultipartException.class,
+            HandlerMethodValidationException.class
+    })
+    public ResponseEntity<ApiResponse<Void>> handleBadParameter(Exception ex, HttpServletRequest req) {
+        log.warn("Rejected request {} {}: {}", req.getMethod(), req.getRequestURI(), ex.getMessage());
+        return build(HttpStatus.BAD_REQUEST, "BAD_REQUEST", "Invalid request parameter", req);
     }
 
     @ExceptionHandler({

@@ -41,6 +41,12 @@ public class SubmissionRecoveryScheduler {
             initialDelayString = "${submission.recovery.interval-ms:60000}"
     )
     public void recoverStalePending() {
+        // A non-empty queue means jobs are waiting, not lost. Re-pushing then would
+        // only add duplicates and later fail genuine submissions under exam load.
+        if (queueService.size() > 0) {
+            return;
+        }
+
         Instant now = Instant.now(clock);
         Instant cutoff = now.minus(Duration.ofMinutes(properties.getRecovery().getStaleAfterMinutes()));
         int maxAttempts = properties.getRecovery().getMaxQueueAttempts();

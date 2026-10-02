@@ -16,6 +16,11 @@ public class CodeExecutionService {
     private static final int MAX_STDERR_LENGTH = 8_192;
     private static final int MAX_COMPILE_OUTPUT_LENGTH = 8_192;
 
+    /** Judge0's default MAX_WALL_TIME_LIMIT is 20 s. */
+    private static final double MAX_WALL_TIME_SECONDS = 20.0;
+    /** Time a test case may wait in Judge0's own queue under exam load, on top of its run time. */
+    private static final long QUEUE_ALLOWANCE_MS = 60_000;
+
     private final Judge0ClientService judge0ClientService;
 
     public CodeExecutionService(
@@ -30,12 +35,17 @@ public class CodeExecutionService {
             SupportedLanguage language =
                     SupportedLanguage.fromName(request.languageName());
 
+            double cpuSeconds = request.timeLimitMs() / 1000.0;
+            // Wall clock covers JVM/interpreter start-up and blocking I/O on top of CPU time
+            double wallSeconds = Math.min(cpuSeconds * 2 + 1, MAX_WALL_TIME_SECONDS);
+
             Judge0SubmissionRequest judge0Request =
                     new Judge0SubmissionRequest(
                             request.sourceCode(),
                             language.getJudge0LanguageId(),
                             request.stdin(),
-                            request.timeLimitMs() / 1000.0,
+                            cpuSeconds,
+                            wallSeconds,
                             request.memoryLimitKb(),
                             request.expectedOutput()
                     );
@@ -43,12 +53,16 @@ public class CodeExecutionService {
             String token =
                     judge0ClientService.submitCode(judge0Request);
 
+            // A fixed ~10 s budget turned legitimate long runs into SYSTEM_ERROR
+            long pollBudgetMs = (long) (wallSeconds * 1000) + QUEUE_ALLOWANCE_MS;
+
             Judge0StatusResponse result =
-                    judge0ClientService.pollResult(token);
+                    judge0ClientService.pollResult(token, pollBudgetMs);
 
             return mapToExecutionResult(
                     result,
-                    request.languageName()
+                    request.languageName(),
+                    request.memoryLimitKb()
             );
 
         } catch (Judge0IntegrationException e) {
@@ -65,7 +79,8 @@ public class CodeExecutionService {
 
     private ExecutionResult mapToExecutionResult(
             Judge0StatusResponse response,
-            String languageName
+            String languageName,
+            long memoryLimitKb
     ) {
 
         int statusId = response.status().id();
@@ -101,11 +116,15 @@ public class CodeExecutionService {
                 case 6 ->
                         TestCaseResultStatus.COMPILATION_ERROR;
 
-                case 15 ->
-                        TestCaseResultStatus.MEMORY_LIMIT_EXCEEDED;
+                // Judge0 1.13 has no memory-limit status: running out of memory
+                // surfaces as a runtime error (SIGSEGV / NZEC).
+                case 7, 8, 9, 10, 11, 12 ->
+                        isOutOfMemory(response, memoryLimitKb)
+                                ? TestCaseResultStatus.MEMORY_LIMIT_EXCEEDED
+                                : TestCaseResultStatus.RUNTIME_ERROR;
 
-                case 7, 8, 9, 10, 11, 12, 14 ->
-                        TestCaseResultStatus.RUNTIME_ERROR;
+                // 13 Internal Error and 14 Exec Format Error are sandbox failures,
+                // not the candidate's fault.
 
                 default ->
                         TestCaseResultStatus.SYSTEM_ERROR;
@@ -120,6 +139,19 @@ public class CodeExecutionService {
                 convertExecutionTime(response.time()),
                 response.memory()
         );
+    }
+
+    private boolean isOutOfMemory(Judge0StatusResponse response, long memoryLimitKb) {
+        if (response.memory() != null && memoryLimitKb > 0
+                && response.memory() >= memoryLimitKb * 0.95) {
+            return true;
+        }
+
+        String stderr = response.stderr();
+        return stderr != null
+                && (stderr.contains("MemoryError")
+                || stderr.contains("OutOfMemoryError")
+                || stderr.contains("std::bad_alloc"));
     }
 
     private boolean isPythonSyntaxError(String stderr) {
@@ -139,7 +171,11 @@ public class CodeExecutionService {
             return null;
         }
 
-        return Math.round(Double.parseDouble(time) * 1000);
+        try {
+            return Math.round(Double.parseDouble(time) * 1000);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private String truncate(String value, int maxLength) {

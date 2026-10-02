@@ -31,10 +31,11 @@ logging:
 
 jwt:
   access-token:
-    secret: ${JWT_ACCESS_SECRET:dGhpcy1pcy1hLXZlcnktc2VjdXJlLWxvbmctc2VjcmV0LWtleS1mb3ItYWNjZXNzLXRva2Vu}
+    # No default here: local/test profiles supply dev keys, every other profile must set the env var
+    secret: ${JWT_ACCESS_SECRET}
     expiry-seconds: 900
   refresh-token:
-    secret: ${JWT_REFRESH_SECRET:dGhpcy1pcy1hLXZlcnktc2VjdXJlLWxvbmctc2VjcmV0LWtleS1mb3ItcmVmcmVzaC10b2tlbg==}
+    secret: ${JWT_REFRESH_SECRET}
     expiry-seconds: 604800       # 7 days
 
 cors:

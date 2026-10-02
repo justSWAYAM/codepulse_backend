@@ -42,7 +42,8 @@ public class ScoringService {
             List<ScoredResult> results
     ) {
         if (results == null || results.isEmpty()) {
-            return BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+            // No results resolves to SYSTEM_ERROR (resolveStatus), which is never scored
+            return null;
         }
 
         // SYSTEM_ERROR means the submission is not scored.

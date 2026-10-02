@@ -3,7 +3,9 @@ package com.codepulse_backend.user.service;
 import com.codepulse_backend.common.audit.AuditService;
 import com.codepulse_backend.common.dto.PagedResponse;
 import com.codepulse_backend.common.enums.Role;
+import com.codepulse_backend.auth.repository.RefreshTokenRepository;
 import com.codepulse_backend.common.exception.DuplicateResourceException;
+import com.codepulse_backend.common.exception.InvalidStateException;
 import com.codepulse_backend.common.exception.ResourceNotFoundException;
 import com.codepulse_backend.common.exception.UnauthorizedException;
 import com.codepulse_backend.common.util.CsvImportService;
@@ -38,18 +40,20 @@ public class UserService {
     private final AuditService auditService;
     private final CsvImportService csvImportService; // Added injection
     private final Validator validator;
+    private final RefreshTokenRepository refreshTokenRepository;
 
     @Transactional
     public UserSummaryResponse createUser(CreateUserRequest request) {
-        if (userRepository.existsByEmail(request.email())) {
-            throw new DuplicateResourceException("User with email " + request.email() + " already exists");
+        String email = request.email().trim().toLowerCase();
+        if (userRepository.existsByEmailIgnoreCase(email)) {
+            throw new DuplicateResourceException("User with email " + email + " already exists");
         }
         if (request.rollNumber() != null && userRepository.existsByRollNumber(request.rollNumber())) {
             throw new DuplicateResourceException("User with roll number " + request.rollNumber() + " already exists");
         }
 
         User user = User.builder()
-                .email(request.email())
+                .email(email)
                 .fullName(request.fullName())
                 .role(request.role())
                 .passwordHash(passwordEncoder.encode(request.password()))
@@ -73,6 +77,8 @@ public class UserService {
     public UserSummaryResponse updateUser(UUID id, UpdateUserRequest request) {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + id));
+
+        guardAdminRemoval(user, request.role() == Role.ADMIN && request.isActive());
 
         user.setRole(request.role());
         user.setActive(request.isActive());
@@ -117,6 +123,9 @@ public class UserService {
         user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
         userRepository.save(user);
 
+        // A stolen refresh cookie must stop working once the password changes
+        refreshTokenRepository.deleteAllByUserId(user.getId());
+
         auditService.log(user.getId(), "PASSWORD_CHANGED", "USER", user.getId(), "User changed password");
     }
 
@@ -125,7 +134,10 @@ public class UserService {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + id));
 
+        guardAdminRemoval(user, false);
+
         user.setActive(false);
+        refreshTokenRepository.deleteAllByUserId(user.getId());
         User updatedUser = userRepository.save(user);
 
         User admin = getCurrentAuthenticatedUser();
@@ -186,7 +198,11 @@ public class UserService {
                     String rollNumber = null;
 
                     if (record.size() >= 5 && !record.get(4).trim().isEmpty()) {
-                        try { year = Integer.parseInt(record.get(4).trim()); } catch(Exception ignored) {}
+                        try {
+                            year = Integer.parseInt(record.get(4).trim());
+                        } catch (NumberFormatException e) {
+                            throw new IllegalArgumentException("year must be a number, got '" + record.get(4).trim() + "'");
+                        }
                     }
                     if (record.size() >= 6) branch = record.get(5).trim().isEmpty() ? null : record.get(5).trim();
                     if (record.size() >= 7) division = record.get(6).trim().isEmpty() ? null : record.get(6).trim();
@@ -225,6 +241,22 @@ public class UserService {
     }
 
     // --- Helper Methods ---
+
+    /**
+     * An admin may not demote or deactivate themselves, and the last active admin
+     * may not be removed: either would lock everyone out of user management.
+     */
+    private void guardAdminRemoval(User target, boolean staysActiveAdmin) {
+        if (target.getRole() != Role.ADMIN || !target.isActive() || staysActiveAdmin) {
+            return;
+        }
+        if (target.getId().equals(getCurrentAuthenticatedUser().getId())) {
+            throw new InvalidStateException("You cannot deactivate or demote your own admin account");
+        }
+        if (userRepository.countByRoleAndIsActiveTrue(Role.ADMIN) <= 1) {
+            throw new InvalidStateException("At least one active admin must remain");
+        }
+    }
 
     private User getCurrentAuthenticatedUser() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();

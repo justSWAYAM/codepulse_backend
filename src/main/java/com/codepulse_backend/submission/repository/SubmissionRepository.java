@@ -102,7 +102,7 @@ public interface SubmissionRepository
         WHERE session_id = :sessionId
           AND submission_type = 'SUBMIT'
           AND status NOT IN ('PENDING', 'SYSTEM_ERROR')
-        ORDER BY question_id, score DESC, submitted_at ASC
+        ORDER BY question_id, score DESC NULLS LAST, submitted_at ASC
         """, nativeQuery = true)
     List<Submission> findCountedSubmissions(
             @Param("sessionId") UUID sessionId

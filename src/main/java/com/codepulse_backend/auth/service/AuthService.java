@@ -40,7 +40,7 @@ public class AuthService {
     @Transactional
     public LoginResponse login(LoginRequest request, HttpServletResponse response) {
         // Same error for unknown email and wrong password, so login can't be used to probe which emails exist
-        User user = userRepository.findByEmail(request.email())
+        User user = userRepository.findFirstByEmailIgnoreCase(request.email().trim())
                 .orElseThrow(() -> new UnauthorizedException("Invalid email or password"));
 
         if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {

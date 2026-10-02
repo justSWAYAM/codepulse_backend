@@ -1,5 +1,6 @@
 package com.codepulse_backend.execution;
 
+import com.codepulse_backend.common.enums.TestCaseResultStatus;
 import com.codepulse_backend.execution.dto.ExecutionRequest;
 import com.codepulse_backend.execution.dto.ExecutionResult;
 import com.codepulse_backend.execution.dto.QueuedSubmissionJob;
@@ -21,15 +22,18 @@ public class ExecutionWorker {
     private final SubmissionQueueService submissionQueueService;
     private final CodeExecutionService codeExecutionService;
     private final ApplicationEventPublisher eventPublisher;
+    private final JobGate jobGate;
 
     public ExecutionWorker(
             SubmissionQueueService submissionQueueService,
             CodeExecutionService codeExecutionService,
-            ApplicationEventPublisher eventPublisher
+            ApplicationEventPublisher eventPublisher,
+            JobGate jobGate
     ) {
         this.submissionQueueService = submissionQueueService;
         this.codeExecutionService = codeExecutionService;
         this.eventPublisher = eventPublisher;
+        this.jobGate = jobGate;
     }
 
     @Scheduled(fixedDelay = 1000)
@@ -57,6 +61,12 @@ public class ExecutionWorker {
     }
 
     private void processJob(QueuedSubmissionJob job) {
+        // Duplicate (recovery re-push) or superseded job: don't spend Judge0 time on it
+        if (!jobGate.shouldExecute(job.submissionId())) {
+            log.info("Skipping job for submission {}: no longer pending", job.submissionId());
+            return;
+        }
+
         List<SubmissionEvaluatedEvent.TestCaseOutcome> outcomes =
                 new ArrayList<>();
 
@@ -92,6 +102,23 @@ public class ExecutionWorker {
                                     : result.memoryUsedKb().intValue()
                     )
             );
+
+            // Same source compiles the same way every time: one compile error decides
+            // every remaining test case, so don't recompile it N times
+            if (result.status() == TestCaseResultStatus.COMPILATION_ERROR) {
+                for (int i = outcomes.size(); i < job.testCases().size(); i++) {
+                    outcomes.add(new SubmissionEvaluatedEvent.TestCaseOutcome(
+                            job.testCases().get(i).testCaseId(),
+                            TestCaseResultStatus.COMPILATION_ERROR,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null
+                    ));
+                }
+                break;
+            }
         }
 
         eventPublisher.publishEvent(

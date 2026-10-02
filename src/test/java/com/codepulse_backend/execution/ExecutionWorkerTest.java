@@ -72,7 +72,8 @@ class ExecutionWorkerTest {
                 new ExecutionWorker(
                         queueService,
                         executionService,
-                        eventPublisher
+                        eventPublisher,
+                        anySubmission -> true
                 );
 
         worker.processQueue();
@@ -105,7 +106,8 @@ class ExecutionWorkerTest {
                 new ExecutionWorker(
                         queueService,
                         executionService,
-                        eventPublisher
+                        eventPublisher,
+                        anySubmission -> true
                 );
 
         worker.processQueue();
@@ -178,7 +180,8 @@ class ExecutionWorkerTest {
                 new ExecutionWorker(
                         queueService,
                         executionService,
-                        eventPublisher
+                        eventPublisher,
+                        anySubmission -> true
                 );
 
         worker.processQueue();

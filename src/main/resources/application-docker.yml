@@ -10,9 +10,12 @@ spring:
       password: ${REDIS_PASSWORD:codepulse_redis_local}
 
 jwt:
-  secret: ${JWT_SECRET}
-  access-token-expiry-minutes: 15
-  refresh-token-expiry-days: 7
+  access-token:
+    secret: ${JWT_ACCESS_SECRET}
+  refresh-token:
+    secret: ${JWT_REFRESH_SECRET}
+  cookie:
+    secure: ${JWT_COOKIE_SECURE:false}
 
 judge0:
   base-url: http://judge0-server:2358
