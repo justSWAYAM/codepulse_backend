@@ -126,4 +126,14 @@ public class GlobalExceptionHandler {
                 req
         );
     }
+
+    @ExceptionHandler(ExecutionBusyException.class)
+    public ResponseEntity<ApiResponse<Void>> handleExecutionBusy(ExecutionBusyException ex, HttpServletRequest req) {
+        return build(HttpStatus.SERVICE_UNAVAILABLE, ex.getCode(), ex.getMessage(), req);
+    }
+
+    @ExceptionHandler(RateLimitExceededException.class)
+    public ResponseEntity<ApiResponse<Void>> handleRateLimited(RateLimitExceededException ex, HttpServletRequest req) {
+        return build(HttpStatus.TOO_MANY_REQUESTS, ex.getCode(), ex.getMessage(), req);
+    }
 }

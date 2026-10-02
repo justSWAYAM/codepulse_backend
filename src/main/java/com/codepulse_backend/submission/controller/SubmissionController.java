@@ -28,6 +28,7 @@ public class SubmissionController {
     private final SubmissionService submissionService;
 
     @PostMapping("/api/submissions/run")
+    @PreAuthorize("hasRole('CANDIDATE')")
     public ResponseEntity<?> run(
             Authentication authentication,
             @Valid @RequestBody RunCodeRequest request
@@ -42,6 +43,7 @@ public class SubmissionController {
     }
 
     @PostMapping("/api/submissions/submit")
+    @PreAuthorize("hasRole('CANDIDATE')")
     public ResponseEntity<?> submit(
             Authentication authentication,
             @Valid @RequestBody SubmitCodeRequest request
@@ -71,6 +73,7 @@ public class SubmissionController {
     public ResponseEntity<PagedResponse<SubmissionSummaryResponse>> getMyHistory(
             Authentication authentication,
             @PathVariable UUID questionId,
+            @RequestParam(required = false) SubmissionType type,
             @PageableDefault(
                     sort = "submittedAt",
                     direction = Sort.Direction.DESC
@@ -83,6 +86,7 @@ public class SubmissionController {
                 submissionService.getMyHistory(
                         candidateId,
                         questionId,
+                        type,
                         pageable
                 )
         );
@@ -118,9 +122,10 @@ public class SubmissionController {
     @PostMapping("/api/submissions/{id}/rejudge")
     @PreAuthorize("hasAnyRole('EVALUATOR', 'ADMIN')")
     public ResponseEntity<Void> rejudgeSubmission(
+            Authentication authentication,
             @PathVariable UUID id
     ) {
-        submissionService.rejudge(id);
+        submissionService.rejudge(id, getCandidateId(authentication));
         return ResponseEntity.accepted().build();
     }
 

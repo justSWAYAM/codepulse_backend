@@ -1,5 +1,7 @@
 package com.codepulse_backend.submission.service;
 import com.codepulse_backend.common.dto.PagedResponse;
+import com.codepulse_backend.common.audit.AuditService;
+import com.codepulse_backend.common.exception.ExecutionBusyException;
 import com.codepulse_backend.common.exception.SubmissionQueueUnavailableException;
 import com.codepulse_backend.submission.dto.ContestSubmissionRowResponse;
 import com.codepulse_backend.user.User;
@@ -65,6 +67,7 @@ public class SubmissionService {
     private final SubmissionMapper submissionMapper;
     private final SubmissionAccessGuard accessGuard;
     private final UserRepository userRepository;
+    private final AuditService auditService;
 
     public SubmissionService(
             QuestionRepository questionRepository,
@@ -81,7 +84,8 @@ public class SubmissionService {
             SubmissionProperties properties,
             SubmissionMapper submissionMapper,
             SubmissionAccessGuard accessGuard,
-            UserRepository userRepository
+            UserRepository userRepository,
+            AuditService auditService
     ) {
         this.questionRepository = questionRepository;
         this.contestRepository = contestRepository;
@@ -98,6 +102,7 @@ public class SubmissionService {
         this.submissionMapper = submissionMapper;
         this.accessGuard = accessGuard;
         this.userRepository = userRepository;
+        this.auditService = auditService;
     }
 
     /**
@@ -129,7 +134,7 @@ public class SubmissionService {
         }
 
         if (!concurrencyLimiter.tryAcquire()) {
-            throw new InvalidStateException("EXECUTION_BUSY");
+            throw new ExecutionBusyException("EXECUTION_BUSY");
         }
 
         Instant submittedAt = Instant.now();
@@ -475,16 +480,26 @@ public class SubmissionService {
         }
 
         accessGuard.assertCandidateOwns(submission, viewerId);
-        return submissionMapper.toCandidateView(submission, results, true);
+
+        // Plan 2.10: verdicts are visible while the exam runs; after it ends they stay
+        // hidden until Module 9 publishes results.
+        boolean resultsVisible = sessionRepository.findById(submission.getSessionId())
+                .map(session -> session.getStatus() == SessionStatus.IN_PROGRESS)
+                .orElse(false);
+
+        return submissionMapper.toCandidateView(submission, results, resultsVisible);
     }
 
     public PagedResponse<SubmissionSummaryResponse> getMyHistory(
             UUID candidateId,
             UUID questionId,
+            SubmissionType type,
             Pageable pageable
     ) {
-        Page<Submission> page = submissionRepository
-                .findByCandidateIdAndQuestionId(candidateId, questionId, pageable);
+        Page<Submission> page = type == null
+                ? submissionRepository.findByCandidateIdAndQuestionId(candidateId, questionId, pageable)
+                : submissionRepository.findByCandidateIdAndQuestionIdAndSubmissionType(
+                        candidateId, questionId, type, pageable);
 
         UUID countedSubmissionId = null;
         if (!page.isEmpty()) {
@@ -515,9 +530,33 @@ public class SubmissionService {
                 page.getTotalPages()
         );
     }
-    public void rejudge(UUID submissionId) {
+    public void rejudge(UUID submissionId, UUID actorId) {
         Submission submission = persistenceService.prepareForRejudge(submissionId);
 
+        auditService.log(
+                actorId,
+                "SUBMISSION_REJUDGED",
+                "SUBMISSION",
+                submission.getId(),
+                "questionId=" + submission.getQuestionId()
+                        + ", candidateId=" + submission.getCandidateId()
+        );
+
+        try {
+            queueService.push(buildJobFromStored(submission));
+        } catch (Exception e) {
+            persistenceService.markSystemError(submission.getId());
+            throw new SubmissionQueueUnavailableException(
+                    "Submission queue is unavailable"
+            );
+        }
+    }
+
+    /**
+     * Rebuilds a queue job from a stored submission against the question's
+     * current test cases. Used by rejudge and the recovery scheduler.
+     */
+    public QueuedSubmissionJob buildJobFromStored(Submission submission) {
         List<TestCase> testCases = testCaseRepository
                 .findByQuestionIdOrderByOrderIndexAsc(submission.getQuestionId());
 
@@ -536,7 +575,7 @@ public class SubmissionService {
                 ))
                 .toList();
 
-        QueuedSubmissionJob job = new QueuedSubmissionJob(
+        return new QueuedSubmissionJob(
                 submission.getId(),
                 submission.getQuestionId(),
                 submission.getSessionId(),
@@ -544,15 +583,6 @@ public class SubmissionService {
                 submission.getLanguage(),
                 payloads
         );
-
-        try {
-            queueService.push(job);
-        } catch (Exception e) {
-            persistenceService.markSystemError(submission.getId());
-            throw new SubmissionQueueUnavailableException(
-                    "Submission queue is unavailable"
-            );
-        }
     }
 
     public PagedResponse<ContestSubmissionRowResponse> getContestSubmissions(

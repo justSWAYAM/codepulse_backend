@@ -11,6 +11,10 @@ spring:
   flyway:
     enabled: false
 
+submission:
+  rate-limit:
+    enabled: false
+
 jwt:
   access-token:
     secret: dGhpcy1pcy1hLXZlcnktc2VjdXJlLWxvbmctc2VjcmV0LWtleS1mb3ItYWNjZXNzLXRva2Vu
@@ -20,3 +24,8 @@ jwt:
     expiry-seconds: 86400
   cookie:
     secure: false
+# The test profile runs on H2 with no Redis credentials; keep /actuator/health about the app itself
+management:
+  health:
+    redis:
+      enabled: false

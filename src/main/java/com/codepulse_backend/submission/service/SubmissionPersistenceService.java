@@ -4,6 +4,9 @@ import com.codepulse_backend.common.enums.SubmissionStatus;
 import com.codepulse_backend.common.enums.SubmissionType;
 import com.codepulse_backend.common.exception.InvalidStateException;
 import com.codepulse_backend.common.exception.ResourceNotFoundException;
+import com.codepulse_backend.session.AssessmentSessionRepository;
+import com.codepulse_backend.session.SessionStatus;
+import com.codepulse_backend.submission.event.SessionScoringCompletedEvent;
 import com.codepulse_backend.submission.entity.Submission;
 import com.codepulse_backend.submission.entity.SubmissionTestCaseResult;
 import com.codepulse_backend.submission.repository.SubmissionRepository;
@@ -15,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -22,14 +26,16 @@ public class SubmissionPersistenceService {
 
     private final SubmissionRepository submissionRepository;
     private final SubmissionTestCaseResultRepository resultRepository;
-
+    private final AssessmentSessionRepository sessionRepository;
 
     public SubmissionPersistenceService(
             SubmissionRepository submissionRepository,
-            SubmissionTestCaseResultRepository resultRepository
+            SubmissionTestCaseResultRepository resultRepository,
+            AssessmentSessionRepository sessionRepository
     ) {
         this.submissionRepository = submissionRepository;
         this.resultRepository = resultRepository;
+        this.sessionRepository = sessionRepository;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -116,8 +122,14 @@ public class SubmissionPersistenceService {
 
         submissionRepository.save(submission);
     }
+    /**
+     * Idempotent: a non-PENDING row is left untouched.
+     * Returns a SessionScoringCompletedEvent when this was the last pending SUBMIT
+     * of a session that has already been finalized. The caller publishes it after
+     * this transaction commits.
+     */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void applyEvaluation(
+    public Optional<SessionScoringCompletedEvent> applyEvaluation(
             UUID submissionId,
             List<SubmissionTestCaseResult> results,
             BigDecimal score,
@@ -132,7 +144,7 @@ public class SubmissionPersistenceService {
                         new ResourceNotFoundException("Submission not found: " + submissionId));
 
         if (submission.getStatus() != SubmissionStatus.PENDING) {
-            return;
+            return Optional.empty();
         }
 
         submission.setStatus(status);
@@ -150,6 +162,57 @@ public class SubmissionPersistenceService {
             result.setSubmission(submission);
             resultRepository.save(result);
         }
+
+        return scoringCompletedEvent(submission.getSessionId());
+    }
+
+    /** Marks a stale PENDING submit as re-queued. Returns false if it is no longer PENDING. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean markRequeued(UUID submissionId, Instant now) {
+        Submission submission = submissionRepository.findByIdForUpdate(submissionId).orElse(null);
+
+        if (submission == null || submission.getStatus() != SubmissionStatus.PENDING) {
+            return false;
+        }
+
+        submission.setQueueAttempts(submission.getQueueAttempts() + 1);
+        submission.setQueuedAt(now);
+        submissionRepository.save(submission);
+        return true;
+    }
+
+    /** Gives up on a PENDING submit (SYSTEM_ERROR, score null). Same completion rule as applyEvaluation. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public Optional<SessionScoringCompletedEvent> markAbandoned(UUID submissionId, Instant now) {
+        Submission submission = submissionRepository.findByIdForUpdate(submissionId).orElse(null);
+
+        if (submission == null || submission.getStatus() != SubmissionStatus.PENDING) {
+            return Optional.empty();
+        }
+
+        submission.setStatus(SubmissionStatus.SYSTEM_ERROR);
+        submission.setScore(null);
+        submission.setEvaluatedAt(now);
+        submissionRepository.save(submission);
+
+        return scoringCompletedEvent(submission.getSessionId());
+    }
+
+    private Optional<SessionScoringCompletedEvent> scoringCompletedEvent(UUID sessionId) {
+        submissionRepository.flush();
+
+        return sessionRepository.findById(sessionId)
+                .filter(session -> session.getStatus() != SessionStatus.IN_PROGRESS)
+                .filter(session -> submissionRepository.countBySessionIdAndSubmissionTypeAndStatus(
+                        sessionId,
+                        SubmissionType.SUBMIT,
+                        SubmissionStatus.PENDING
+                ) == 0)
+                .map(session -> new SessionScoringCompletedEvent(
+                        session.getId(),
+                        session.getContestId(),
+                        session.getCandidateId()
+                ));
     }
     @Transactional
     public Submission prepareForRejudge(UUID submissionId) {
@@ -160,7 +223,7 @@ public class SubmissionPersistenceService {
             throw new InvalidStateException("SUBMISSION_NOT_REJUDGEABLE");
         }
 
-        // Wipe old results and reset state using the existing resultRepository[cite: 1]
+        // Wipe old results and reset state
         resultRepository.deleteBySubmissionId(submissionId);
 
         submission.setStatus(SubmissionStatus.PENDING);

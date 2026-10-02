@@ -81,6 +81,13 @@ public interface SubmissionRepository
             @Param("maxAttempts") int maxAttempts
     );
 
+    /** Stale PENDING rows that have used up their queue attempts. */
+    List<Submission> findByStatusAndQueueAttemptsGreaterThanEqualAndQueuedAtBefore(
+            SubmissionStatus status,
+            int maxAttempts,
+            Instant cutoff
+    );
+
     /**
      * Best SUBMIT per question for a session.
      *

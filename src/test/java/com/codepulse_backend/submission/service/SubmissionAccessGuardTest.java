@@ -1,5 +1,6 @@
 package com.codepulse_backend.submission.service;
 
+import com.codepulse_backend.common.exception.InvalidStateException;
 import com.codepulse_backend.common.exception.ResourceNotFoundException;
 import com.codepulse_backend.config.SubmissionProperties;
 import com.codepulse_backend.session.AssessmentSession;
@@ -102,7 +103,7 @@ class SubmissionAccessGuardTest {
                 );
 
         assertThrows(
-                IllegalStateException.class,
+                InvalidStateException.class,
                 () -> guard.assertWithinDeadline(session)
         );
     }
@@ -115,7 +116,7 @@ class SubmissionAccessGuardTest {
         session.setStatus(SessionStatus.SUBMITTED);
 
         assertThrows(
-                IllegalStateException.class,
+                InvalidStateException.class,
                 () -> guard.assertWithinDeadline(session)
         );
     }

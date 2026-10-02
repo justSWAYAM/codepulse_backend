@@ -1,5 +1,6 @@
 package com.codepulse_backend.submission.event;
 
+import com.codepulse_backend.config.SubmissionProperties;
 import com.codepulse_backend.execution.event.SubmissionEvaluatedEvent;
 import com.codepulse_backend.common.enums.TestCaseResultStatus;
 import com.codepulse_backend.question.entity.Question;
@@ -14,6 +15,8 @@ import com.codepulse_backend.testcase.entity.TestCase;
 import com.codepulse_backend.testcase.repository.TestCaseRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
@@ -36,9 +39,12 @@ public class SubmissionEvaluatedListener {
     private final TestCaseRepository testCaseRepository;
     private final SubmissionPersistenceService persistenceService;
     private final ScoringService scoringService;
+    private final SubmissionProperties properties;
+    private final ApplicationEventPublisher publisher;
 
     @EventListener
     public void handle(SubmissionEvaluatedEvent event) {
+        MDC.put("submissionId", event.submissionId().toString());
         try {
             process(event);
         } catch (Exception e) {
@@ -50,6 +56,8 @@ public class SubmissionEvaluatedListener {
 
             // Deliberately leave the submission PENDING.
             // Recovery scheduler will retry it.
+        } finally {
+            MDC.remove("submissionId");
         }
     }
 
@@ -107,8 +115,8 @@ public class SubmissionEvaluatedListener {
 
             result.setTestCaseId(testCase.getId());
             result.setStatus(outcome.status());
-            result.setActualOutput(truncate(outcome.stdout(), 10_000));
-            result.setStderr(truncate(outcome.stderr(), 4_000));
+            result.setActualOutput(truncate(outcome.stdout(), properties.getStoredOutputMaxChars()));
+            result.setStderr(truncate(outcome.stderr(), properties.getStoredStderrMaxChars()));
 
             result.setExecutionTimeMs(
                     outcome.executionTimeMs() == null
@@ -138,7 +146,7 @@ public class SubmissionEvaluatedListener {
                     && outcome.compileOutput() != null
                     && !outcome.compileOutput().isBlank()) {
 
-                compileOutput = truncate(outcome.compileOutput(), 10_000);
+                compileOutput = truncate(outcome.compileOutput(), properties.getStoredOutputMaxChars());
             }
         }
 
@@ -151,6 +159,7 @@ public class SubmissionEvaluatedListener {
                         scoredResults
                 );
 
+        // Published only after applyEvaluation's own transaction has committed
         persistenceService.applyEvaluation(
                 submission.getId(),
                 results,
@@ -160,7 +169,7 @@ public class SubmissionEvaluatedListener {
                 event.outcomes().size(),
                 compileOutput,
                 Instant.now()
-        );
+        ).ifPresent(publisher::publishEvent);
 
         log.info(
                 "Submission evaluated: submissionId={}, status={}, score={}, passed={}/{}",

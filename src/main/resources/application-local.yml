@@ -12,6 +12,8 @@ spring:
     redis:
       host: localhost
       port: 6379
+      # Must match requirepass in docker-compose.yml
+      password: ${REDIS_PASSWORD:codepulse_redis_local}
   task:
     scheduling:
       pool:
@@ -45,6 +47,25 @@ jwt:
   refresh-token:
     secret: ${JWT_REFRESH_SECRET:dGhpcy1pcy1hLXZlcnktc2VjdXJlLWxvbmctc2VjcmV0LWtleS1mb3ItcmVmcmVzaC10b2tlbg==}
     expiry-seconds: 604800       # 7 days
+
+# Module 8 submission limits (defaults also live in SubmissionProperties)
+submission:
+  grace-seconds: 5
+  max-submit-per-question: 30
+  max-run-per-question: 100
+  max-concurrent-runs: 10
+  run-permit-wait-ms: 2000
+  stored-output-max-chars: 10000
+  stored-stderr-max-chars: 4000
+  recovery:
+    interval-ms: 60000
+    stale-after-minutes: 10
+    max-queue-attempts: 3        # initial push counts as attempt 1
+  rate-limit:
+    enabled: true
+    login-per-minute: 10         # per client IP
+    run-per-minute: 20           # per user
+    submit-per-minute: 10        # per user
 
 judge0:
   base-url: http://localhost:2358
