@@ -8,7 +8,8 @@ services:
       POSTGRES_USER: codepulse
       POSTGRES_PASSWORD: codepulse_local
     ports:
-      - "5432:5432"
+      # Host port comes from .env (DB_PORT) — use 5433 if a native PostgreSQL already holds 5432
+      - "${DB_PORT:-5432}:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
 

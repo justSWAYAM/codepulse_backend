@@ -1,9 +1,12 @@
 spring:
   application:
     name: codepulse-backend
+  # Load DB_HOST / DB_PORT / DB_PASSWORD etc. from the repo's .env when it exists
+  config:
+    import: optional:file:.env[.properties]
   datasource:
-    url: jdbc:postgresql://localhost:5432/codepulse
-    username: codepulse
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:codepulse}
+    username: ${DB_USER:codepulse}
     password: ${DB_PASSWORD:codepulse_local}
   data:
     redis:
