@@ -12,6 +12,7 @@ import com.codepulse_backend.contest.entity.Contest;
 import com.codepulse_backend.contest.entity.ContestCandidate;
 import com.codepulse_backend.contest.repository.ContestCandidateRepository;
 import com.codepulse_backend.contest.repository.ContestRepository;
+import com.codepulse_backend.session.AssessmentSessionRepository;
 import com.codepulse_backend.user.User;
 import com.codepulse_backend.user.dto.UserSummaryResponse;
 import com.codepulse_backend.user.repository.UserRepository;
@@ -38,6 +39,7 @@ public class ContestService {
     private final ContestRepository contestRepository;
     private final ContestCandidateRepository contestCandidateRepository;
     private final UserRepository userRepository;
+    private final AssessmentSessionRepository assessmentSessionRepository;
     private final AuditService auditService;
     private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
@@ -99,6 +101,29 @@ public class ContestService {
         }
 
         return toContestResponse(contestRepository.save(contest));
+    }
+
+    // ─── Delete ───────────────────────────────────────────────────────────────
+
+    /**
+     * Questions, test cases and candidate assignments cascade in the DB. Sessions and
+     * submissions don't, so contests that have started (and hold exam records) are kept.
+     */
+    @Transactional
+    public void deleteContest(UUID id) {
+        Contest contest = findContestById(id);
+        User currentUser = getCurrentAuthenticatedUser();
+
+        if (contest.getStatus() == ContestStatus.ONGOING || contest.getStatus() == ContestStatus.COMPLETED) {
+            throw new InvalidStateException("Only DRAFT or PUBLISHED contests can be deleted. Current status: " + contest.getStatus());
+        }
+        if (assessmentSessionRepository.existsByContestId(id)) {
+            throw new InvalidStateException("Contest has exam sessions and can't be deleted");
+        }
+
+        contestRepository.delete(contest);
+        auditService.log(currentUser.getId(), "CONTEST_DELETED", "CONTEST", id,
+                "Admin deleted contest: " + contest.getTitle());
     }
 
     // ─── Publish ──────────────────────────────────────────────────────────────
@@ -261,6 +286,36 @@ public class ContestService {
                 String.format("%d candidates assigned to contest %s", assignedCount, contest.getTitle()));
 
         return new AssignCandidatesResult(assignedCount, alreadyAssignedCount, notFoundCount, failedIds);
+    }
+
+    // ─── Unassign Candidates ──────────────────────────────────────────────────
+
+    @Transactional
+    public UnassignCandidatesResult unassignCandidates(UUID contestId, UnassignCandidatesRequest request) {
+        Contest contest = findContestById(contestId);
+        User currentUser = getCurrentAuthenticatedUser();
+
+        if (contest.getStatus() != ContestStatus.DRAFT) {
+            throw new InvalidStateException("Candidates can only be unassigned from a DRAFT contest. Current status: " + contest.getStatus());
+        }
+
+        int removedCount = 0;
+        int notAssignedCount = 0;
+
+        for (UUID candidateId : request.candidateIds()) {
+            Optional<ContestCandidate> assignment = contestCandidateRepository.findByContestIdAndCandidateId(contestId, candidateId);
+            if (assignment.isEmpty()) {
+                notAssignedCount++;
+                continue;
+            }
+            contestCandidateRepository.delete(assignment.get());
+            removedCount++;
+        }
+
+        auditService.log(currentUser.getId(), "CANDIDATES_UNASSIGNED", "CONTEST", contestId,
+                String.format("%d candidates unassigned from contest %s", removedCount, contest.getTitle()));
+
+        return new UnassignCandidatesResult(removedCount, notAssignedCount);
     }
 
     // ─── Get Assigned Candidates ──────────────────────────────────────────────

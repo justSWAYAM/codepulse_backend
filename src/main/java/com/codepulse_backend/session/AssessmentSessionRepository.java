@@ -19,6 +19,8 @@ public interface AssessmentSessionRepository
             UUID candidateId
     );
 
+    boolean existsByContestId(UUID contestId);
+
     /**
      * Locking variant used by start/submit so the row is read under the lock
      * (loading it unlocked first and locking afterwards returns the stale
