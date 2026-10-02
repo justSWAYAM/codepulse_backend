@@ -22,6 +22,7 @@ import com.codepulse_backend.common.enums.SupportedLanguage;
 import com.codepulse_backend.common.exception.InvalidStateException;
 import com.codepulse_backend.common.exception.ResourceNotFoundException;
 import com.codepulse_backend.config.SubmissionProperties;
+import com.codepulse_backend.result.service.ResultVisibilityService;
 import com.codepulse_backend.contest.entity.Contest;
 import com.codepulse_backend.contest.repository.ContestRepository;
 import com.codepulse_backend.execution.CodeExecutionService;
@@ -71,6 +72,7 @@ public class SubmissionService {
     private final UserRepository userRepository;
     private final AuditService auditService;
     private final org.springframework.context.ApplicationEventPublisher eventPublisher;
+    private final ResultVisibilityService resultVisibility;
 
     public SubmissionService(
             QuestionRepository questionRepository,
@@ -89,7 +91,8 @@ public class SubmissionService {
             SubmissionAccessGuard accessGuard,
             UserRepository userRepository,
             AuditService auditService,
-            org.springframework.context.ApplicationEventPublisher eventPublisher
+            org.springframework.context.ApplicationEventPublisher eventPublisher,
+            ResultVisibilityService resultVisibility
     ) {
         this.questionRepository = questionRepository;
         this.contestRepository = contestRepository;
@@ -108,6 +111,7 @@ public class SubmissionService {
         this.userRepository = userRepository;
         this.auditService = auditService;
         this.eventPublisher = eventPublisher;
+        this.resultVisibility = resultVisibility;
     }
 
     /**
@@ -478,10 +482,16 @@ public class SubmissionService {
         // Plan 2.10: verdicts are visible while the exam runs; after it ends they stay
         // hidden until Module 9 publishes results.
         boolean resultsVisible = sessionRepository.findById(submission.getSessionId())
-                .map(session -> session.getStatus() == SessionStatus.IN_PROGRESS)
+                .map(this::verdictsVisible)
                 .orElse(false);
 
         return submissionMapper.toCandidateView(submission, results, resultsVisible);
+    }
+
+    /** While the exam runs, or once Module 9 has published the contest's results. */
+    private boolean verdictsVisible(AssessmentSession session) {
+        return session.getStatus() == SessionStatus.IN_PROGRESS
+                || resultVisibility.isPublished(session.getContestId());
     }
 
     public PagedResponse<SubmissionSummaryResponse> getMyHistory(
@@ -511,7 +521,7 @@ public class SubmissionService {
         // Plan 2.10: once the session is over, verdicts stay hidden until results are published
         boolean resultsVisible = page.isEmpty() || sessionRepository
                 .findById(page.getContent().get(0).getSessionId())
-                .map(session -> session.getStatus() == SessionStatus.IN_PROGRESS)
+                .map(this::verdictsVisible)
                 .orElse(false);
 
         final UUID finalCountedId = countedSubmissionId;

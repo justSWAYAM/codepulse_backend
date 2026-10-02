@@ -4,6 +4,8 @@ import com.codepulse_backend.common.enums.SubmissionStatus;
 import com.codepulse_backend.common.enums.SubmissionType;
 import com.codepulse_backend.common.exception.ConflictException;
 import com.codepulse_backend.common.exception.ResourceNotFoundException;
+import com.codepulse_backend.contest.entity.Contest;
+import com.codepulse_backend.contest.repository.ContestRepository;
 import com.codepulse_backend.session.AssessmentSessionRepository;
 import com.codepulse_backend.session.SessionStatus;
 import com.codepulse_backend.submission.event.SessionScoringCompletedEvent;
@@ -27,15 +29,18 @@ public class SubmissionPersistenceService {
     private final SubmissionRepository submissionRepository;
     private final SubmissionTestCaseResultRepository resultRepository;
     private final AssessmentSessionRepository sessionRepository;
+    private final ContestRepository contestRepository;
 
     public SubmissionPersistenceService(
             SubmissionRepository submissionRepository,
             SubmissionTestCaseResultRepository resultRepository,
-            AssessmentSessionRepository sessionRepository
+            AssessmentSessionRepository sessionRepository,
+            ContestRepository contestRepository
     ) {
         this.submissionRepository = submissionRepository;
         this.resultRepository = resultRepository;
         this.sessionRepository = sessionRepository;
+        this.contestRepository = contestRepository;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -250,6 +255,17 @@ public class SubmissionPersistenceService {
     }
     @Transactional
     public Submission prepareForRejudge(UUID submissionId) {
+        // Module 9: published results are frozen. Take the contest lock first (the
+        // result lock order), so a rejudge can't race a publish.
+        submissionRepository.findById(submissionId)
+                .flatMap(s -> sessionRepository.findById(s.getSessionId()))
+                .flatMap(session -> contestRepository.findByIdForUpdate(session.getContestId()))
+                .filter(Contest::isResultsPublished)
+                .ifPresent(contest -> {
+                    throw new ConflictException("RESULTS_PUBLISHED_LOCKED",
+                            "Results are published. Unpublish them to rejudge");
+                });
+
         Submission submission = submissionRepository.findByIdForUpdate(submissionId)
                 .orElseThrow(() -> new ResourceNotFoundException("Submission not found"));
 
