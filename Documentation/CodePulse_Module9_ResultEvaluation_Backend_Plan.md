@@ -5,7 +5,7 @@
 
 **Depends on:** Module 0 (Foundation) + Module 1 (Auth) + Module 3 (`Contest`, `ContestCandidate`, `ContestCompletedEvent`) + Module 4 (`Question.points`, questions locked once `ONGOING`) + Module 6 (`AssessmentSession`, `startedAt`) + Module 8 (`Submission`, counted query, `SessionScoringCompletedEvent`, rejudge, `SubmissionMapper.toCandidateView(…, resultsVisible)`).
 
-**Status:** plan, not yet built (written 2026-10-03 against backend `master` @ `41db676`).
+**Status:** built on branch `feature/module-9-results` (2026-10-03). Plan written against backend `master` @ `41db676`; notes marked *As built* record where the code differs.
 
 > **Blocker check before any Module 9 code:** Module 8 must be producing final statuses for every SUBMIT (no rows stuck in `PENDING`), and `SessionScoringCompletedEvent` must fire once per finalized session. Both are verified by the Module 8 Definition of Done. Run `./mvnw test -DargLine=-Duser.timezone=UTC` first: it must be green before you start.
 
@@ -401,31 +401,13 @@ com.codepulse_backend/
 - `@Modifying void deleteAllByResultId(UUID resultId)` (recompute replaces a result's rows)
 
 `ManualEvaluationRepository`:
-- **Active overrides for a session** (single query, newest per question):
-```sql
--- native; PostgreSQL DISTINCT ON, same idiom as Module 8's counted query
-SELECT DISTINCT ON (question_id) *
-FROM manual_evaluations
-WHERE session_id = :sessionId
-ORDER BY question_id, evaluated_at DESC, id DESC;
-```
-  A returned row with `adjusted_score IS NULL` is a revert, meaning "no active override".
-- `List<ManualEvaluation> findAllBySessionIdOrderByEvaluatedAtDesc(UUID sessionId)`, the history for the detail view.
+- `List<ManualEvaluation> findAllBySessionIdOrderByEvaluatedAtDescCreatedAtDesc(UUID sessionId)`: the history for the detail view, and the source of **active overrides**: the first row per question wins, and a row with `adjusted_score IS NULL` is a revert ("no active override").
+  > *As built:* the active override is picked in Java from this list rather than with a `DISTINCT ON` query. A session has a handful of evaluations, and this keeps the code path working on the H2 test profile too.
 
 `SubmissionRepository` (Module 8, **added**):
 - `long countBySessionIdAndSubmissionTypeAndStatus(...)` already exists. Reuse it with `SYSTEM_ERROR` for `UNRESOLVED_SYSTEM_ERROR`.
-- **New**, for readiness:
-```java
-@Query("""
-    SELECT COUNT(DISTINCT s.sessionId) FROM Submission s
-    WHERE s.sessionId IN (SELECT a.id FROM AssessmentSession a
-                          WHERE a.contestId = :contestId AND a.status <> :inProgress)
-      AND s.submissionType = :submit AND s.status = :pending
-    """)
-long countFinalizedSessionsWithPendingSubmit(UUID contestId, SessionStatus inProgress,
-                                             SubmissionType submit, SubmissionStatus pending);
-```
-- **New**, for the detail view: `List<Object[]>` or a projection giving `(questionId, submitCount, systemErrorCount)` per session, so each question can show "3 attempts, 1 judge error" without N queries.
+- **New**, for readiness: `List<UUID> findSessionIdsInContestWithStatus(contestId, SUBMIT, PENDING)`, the sessions that still have a SUBMIT judging. Readiness compares it with the contest's sessions (`AssessmentSessionRepository.findAllByContestId`, also new) so "still judging" and "missing" are counted exactly.
+- **New**, for the detail view: `List<Object[]> countBySessionGroupedByQuestionAndStatus(sessionId, SUBMIT)`, i.e. `(questionId, status, count)`, so each question can show "3 attempts, 1 judge error" without N queries.
 
 `ContestRepository` (Module 3, **added**): `@Lock(PESSIMISTIC_WRITE) @Query("select c from Contest c where c.id = :id") Optional<Contest> findByIdForUpdate(UUID id)`.
 
@@ -727,7 +709,7 @@ Module 9 is complete when every candidate has a correct, explainable, ranked res
 | `result/entity/ManualEvaluation.java` | **New** | append-only |
 | `result/repository/ResultRepository.java` | **New** | |
 | `result/repository/ResultQuestionScoreRepository.java` | **New** | |
-| `result/repository/ManualEvaluationRepository.java` | **New** | active-override `DISTINCT ON` query |
+| `result/repository/ManualEvaluationRepository.java` | **New** | history, newest first (active override picked in Java) |
 | `result/dto/*` | **New** | requests, readiness, leaderboard, staff view, candidate view, evaluation response |
 | `result/service/ResultService.java` | **New** | recompute, rerank, publish/unpublish, reads |
 | `result/service/ResultCalculator.java` | **New** | pure totals and review reasons |
