@@ -44,6 +44,10 @@ public class CsvImportService {
                      CSVFormat.DEFAULT.builder()
                              .setHeader()
                              .setSkipHeaderRecord(true)
+                             // "Input" / " input " match "input": spreadsheets capitalise
+                             // headers, and the upload preview already ignores case
+                             .setIgnoreHeaderCase(true)
+                             .setTrim(true)
                              .build())) {
 
             for (CSVRecord record : parser) {

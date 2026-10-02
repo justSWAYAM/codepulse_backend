@@ -67,6 +67,11 @@ submission:
     run-per-minute: 20           # per user
     submit-per-minute: 10        # per user
 
+# Submissions judged in parallel (each job runs its test cases in order)
+execution:
+  worker:
+    concurrency: 4
+
 judge0:
   base-url: http://localhost:2358
   auth-token: ""
