@@ -11,6 +11,7 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 @Entity
 @Table(name = "contests")
@@ -47,4 +48,14 @@ public class Contest extends BaseEntity {
     @Builder.Default
     private ContestStatus status = ContestStatus.DRAFT;
 
+    /** Module 9: results are published when this is set. The single source of truth. */
+    @Column(name = "results_published_at")
+    private Instant resultsPublishedAt;
+
+    @Column(name = "results_published_by")
+    private UUID resultsPublishedBy;
+
+    public boolean isResultsPublished() {
+        return resultsPublishedAt != null;
+    }
 }

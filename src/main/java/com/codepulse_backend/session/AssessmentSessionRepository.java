@@ -62,4 +62,7 @@ public interface AssessmentSessionRepository
             UUID candidateId,
             SessionStatus status
     );
+
+    /** Module 9 readiness: every session of a contest (tens to a few hundred rows). */
+    List<AssessmentSession> findAllByContestId(UUID contestId);
 }

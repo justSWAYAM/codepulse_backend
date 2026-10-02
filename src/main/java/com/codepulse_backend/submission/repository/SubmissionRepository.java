@@ -124,4 +124,28 @@ public interface SubmissionRepository
             @Param("status") SubmissionStatus status,
             Pageable pageable
     );
+
+    /** Module 9 readiness: sessions in a contest that have a SUBMIT in the given status. */
+    @Query("""
+        SELECT DISTINCT s.sessionId FROM Submission s
+        WHERE s.sessionId IN (SELECT a.id FROM AssessmentSession a WHERE a.contestId = :contestId)
+          AND s.submissionType = :type
+          AND s.status = :status
+        """)
+    List<UUID> findSessionIdsInContestWithStatus(
+            @Param("contestId") UUID contestId,
+            @Param("type") SubmissionType type,
+            @Param("status") SubmissionStatus status
+    );
+
+    /** Module 9 detail view: SUBMIT attempts per question in a session, with their statuses. */
+    @Query("""
+        SELECT s.questionId, s.status, COUNT(s) FROM Submission s
+        WHERE s.sessionId = :sessionId AND s.submissionType = :type
+        GROUP BY s.questionId, s.status
+        """)
+    List<Object[]> countBySessionGroupedByQuestionAndStatus(
+            @Param("sessionId") UUID sessionId,
+            @Param("type") SubmissionType type
+    );
 }
