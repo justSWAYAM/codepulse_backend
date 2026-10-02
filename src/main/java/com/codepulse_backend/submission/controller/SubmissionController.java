@@ -5,7 +5,7 @@ import com.codepulse_backend.common.dto.PagedResponse;
 import com.codepulse_backend.common.enums.SubmissionStatus;
 import com.codepulse_backend.common.enums.SubmissionType;
 import com.codepulse_backend.submission.dto.RunCodeRequest;
-import com.codepulse_backend.submission.dto.SubmissionDetailResponse;
+import com.codepulse_backend.submission.dto.ContestSubmissionRowResponse;
 import com.codepulse_backend.submission.dto.SubmissionSummaryResponse;
 import com.codepulse_backend.submission.dto.SubmitCodeRequest;
 import com.codepulse_backend.submission.service.SubmissionService;
@@ -55,14 +55,14 @@ public class SubmissionController {
     }
 
     @GetMapping("/api/submissions/{submissionId}")
-    public ResponseEntity<SubmissionDetailResponse> getSubmission(
+    public ResponseEntity<?> getSubmission(
             Authentication authentication,
             @PathVariable UUID submissionId
     ) {
-        UUID candidateId = getCandidateId(authentication);
+        UUID viewerId = getCandidateId(authentication);
 
         return ResponseEntity.ok(
-                submissionService.getSubmission(candidateId, submissionId)
+                submissionService.getSubmission(authentication, viewerId, submissionId)
         );
     }
 
@@ -90,12 +90,17 @@ public class SubmissionController {
 
     @GetMapping("/api/contests/{contestId}/submissions")
     @PreAuthorize("hasAnyRole('EVALUATOR', 'ADMIN')")
-    public ResponseEntity<PagedResponse<SubmissionSummaryResponse>> listContestSubmissions(
+    public ResponseEntity<PagedResponse<ContestSubmissionRowResponse>> listContestSubmissions(
             @PathVariable UUID contestId,
             @RequestParam(required = false) UUID candidateId,
             @RequestParam(required = false) UUID questionId,
             @RequestParam(required = false) SubmissionType type,
             @RequestParam(required = false) SubmissionStatus status,
+            @PageableDefault(
+                    size = 20,
+                    sort = "submittedAt",
+                    direction = Sort.Direction.DESC
+            )
             Pageable pageable) {
 
         return ResponseEntity.ok(

@@ -1,7 +1,13 @@
 package com.codepulse_backend.submission.service;
 import com.codepulse_backend.common.dto.PagedResponse;
 import com.codepulse_backend.common.exception.SubmissionQueueUnavailableException;
-import com.codepulse_backend.submission.dto.SubmissionDetailResponse;
+import com.codepulse_backend.submission.dto.ContestSubmissionRowResponse;
+import com.codepulse_backend.user.User;
+import com.codepulse_backend.user.repository.UserRepository;
+import org.springframework.security.core.Authentication;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import com.codepulse_backend.submission.dto.SubmissionSummaryResponse;
 import com.codepulse_backend.submission.entity.SubmissionTestCaseResult;
 import java.util.List;
@@ -56,6 +62,9 @@ public class SubmissionService {
     private final RunConcurrencyLimiter concurrencyLimiter;
     private final SubmissionProperties properties;
     private final SubmissionTestCaseResultRepository submissionTestCaseResultRepository;
+    private final SubmissionMapper submissionMapper;
+    private final SubmissionAccessGuard accessGuard;
+    private final UserRepository userRepository;
 
     public SubmissionService(
             QuestionRepository questionRepository,
@@ -69,7 +78,10 @@ public class SubmissionService {
             CodeExecutionService executionService,
             ScoringService scoringService,
             RunConcurrencyLimiter concurrencyLimiter,
-            SubmissionProperties properties
+            SubmissionProperties properties,
+            SubmissionMapper submissionMapper,
+            SubmissionAccessGuard accessGuard,
+            UserRepository userRepository
     ) {
         this.questionRepository = questionRepository;
         this.contestRepository = contestRepository;
@@ -83,6 +95,9 @@ public class SubmissionService {
         this.scoringService = scoringService;
         this.concurrencyLimiter = concurrencyLimiter;
         this.properties = properties;
+        this.submissionMapper = submissionMapper;
+        this.accessGuard = accessGuard;
+        this.userRepository = userRepository;
     }
 
     /**
@@ -435,24 +450,34 @@ public class SubmissionService {
             AssessmentSession session
     ) {
     }
-    public SubmissionDetailResponse getSubmission(
-            UUID candidateId,
+    /**
+     * Candidates get their own submission as a candidate view: sample results in full,
+     * hidden test cases only as a passed/total summary. Evaluators and admins get the
+     * full evaluator view. A candidate asking for someone else's submission gets 404,
+     * so submission IDs can't be probed.
+     */
+    public Object getSubmission(
+            Authentication authentication,
+            UUID viewerId,
             UUID submissionId
     ) {
         Submission submission = submissionRepository.findById(submissionId)
                 .orElseThrow(() ->
-                        new InvalidStateException("SUBMISSION_NOT_FOUND")
+                        new ResourceNotFoundException("SUBMISSION_NOT_FOUND")
                 );
-
-        if (!submission.getCandidateId().equals(candidateId)) {
-            throw new InvalidStateException("SUBMISSION_ACCESS_DENIED");
-        }
 
         List<SubmissionTestCaseResult> results =
                 submissionTestCaseResultRepository.findBySubmissionId(submissionId);
 
-        return SubmissionDetailResponse.from(submission, results);
+        if (accessGuard.resolveViewerRole(authentication)
+                != SubmissionAccessGuard.ViewerRole.CANDIDATE) {
+            return submissionMapper.toEvaluatorView(submission, results);
+        }
+
+        accessGuard.assertCandidateOwns(submission, viewerId);
+        return submissionMapper.toCandidateView(submission, results, true);
     }
+
     public PagedResponse<SubmissionSummaryResponse> getMyHistory(
             UUID candidateId,
             UUID questionId,
@@ -530,7 +555,7 @@ public class SubmissionService {
         }
     }
 
-    public PagedResponse<SubmissionSummaryResponse> getContestSubmissions(
+    public PagedResponse<ContestSubmissionRowResponse> getContestSubmissions(
             UUID contestId,
             UUID candidateId,
             UUID questionId,
@@ -547,8 +572,20 @@ public class SubmissionService {
                 pageable
         );
 
-        List<SubmissionSummaryResponse> content = page.getContent().stream()
-                .map(sub -> SubmissionSummaryResponse.from(sub, false))
+        List<UUID> candidateIds = page.getContent().stream()
+                .map(Submission::getCandidateId)
+                .distinct()
+                .toList();
+
+        Map<UUID, User> candidates = userRepository.findAllById(candidateIds)
+                .stream()
+                .collect(Collectors.toMap(User::getId, Function.identity()));
+
+        List<ContestSubmissionRowResponse> content = page.getContent().stream()
+                .map(sub -> ContestSubmissionRowResponse.from(
+                        sub,
+                        candidates.get(sub.getCandidateId())
+                ))
                 .toList();
 
         return new PagedResponse<>(
