@@ -4,13 +4,16 @@ import com.codepulse_backend.common.audit.AuditService;
 import com.codepulse_backend.common.dto.PagedResponse;
 import com.codepulse_backend.common.enums.Role;
 import com.codepulse_backend.auth.repository.RefreshTokenRepository;
+import com.codepulse_backend.common.exception.ConflictException;
 import com.codepulse_backend.common.exception.DuplicateResourceException;
 import com.codepulse_backend.common.exception.InvalidStateException;
 import com.codepulse_backend.common.exception.ResourceNotFoundException;
 import com.codepulse_backend.common.exception.UnauthorizedException;
 import com.codepulse_backend.common.util.CsvImportService;
+import com.codepulse_backend.result.service.ResultService;
 import com.codepulse_backend.user.User;
 import com.codepulse_backend.user.dto.*;
+import com.codepulse_backend.user.repository.UserDeletionRepository;
 import com.codepulse_backend.user.repository.UserRepository;
 import com.codepulse_backend.user.repository.UserSpecification;
 import jakarta.validation.ConstraintViolation;
@@ -41,6 +44,8 @@ public class UserService {
     private final CsvImportService csvImportService; // Added injection
     private final Validator validator;
     private final RefreshTokenRepository refreshTokenRepository;
+    private final UserDeletionRepository userDeletionRepository;
+    private final ResultService resultService;
 
     @Transactional
     public UserSummaryResponse createUser(CreateUserRequest request) {
@@ -160,6 +165,36 @@ public class UserService {
         return mapToSummary(updatedUser);
     }
 
+    /**
+     * Hard delete. A candidate's enrolments, sessions, submissions and results go with the
+     * account; anyone whose content other users depend on must be deactivated instead.
+     */
+    @Transactional
+    public void deleteUser(UUID id) {
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + id));
+
+        User admin = getCurrentAuthenticatedUser();
+        if (user.getId().equals(admin.getId())) {
+            throw new InvalidStateException("You cannot delete your own account");
+        }
+        guardAdminRemoval(user, false);
+
+        if (userDeletionRepository.isInAssessment(id)) {
+            throw new ConflictException("USER_IN_ASSESSMENT",
+                    "User has an assessment in progress or a submission being judged. Try again once it finishes");
+        }
+        if (userDeletionRepository.hasAuthoredContent(id)) {
+            throw new ConflictException("USER_HAS_AUTHORED_CONTENT",
+                    "User has created contests, questions, test cases or evaluations. Deactivate the user instead");
+        }
+
+        resultService.removeCandidateResults(id);
+        userDeletionRepository.deleteUserAndAssessmentData(id);
+
+        auditService.log(admin.getId(), "USER_DELETED", "USER", id, "Admin deleted user: " + user.getEmail());
+    }
+
     @Transactional(readOnly = true)
     public PagedResponse<UserSummaryResponse> getUsers(Role role, Boolean isActive, String search, Pageable pageable) {
         Page<User> userPage = userRepository.findAll(UserSpecification.withFilters(role, isActive, search), pageable);
@@ -251,7 +286,7 @@ public class UserService {
             return;
         }
         if (target.getId().equals(getCurrentAuthenticatedUser().getId())) {
-            throw new InvalidStateException("You cannot deactivate or demote your own admin account");
+            throw new InvalidStateException("You cannot deactivate, demote or delete your own admin account");
         }
         if (userRepository.countByRoleAndIsActiveTrue(Role.ADMIN) <= 1) {
             throw new InvalidStateException("At least one active admin must remain");

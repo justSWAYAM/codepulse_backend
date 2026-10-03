@@ -14,6 +14,8 @@ public interface ResultRepository extends JpaRepository<Result, UUID> {
 
     List<Result> findAllByContestId(UUID contestId);
 
+    List<Result> findAllByCandidateId(UUID candidateId);
+
     long countByContestIdAndStatus(UUID contestId, ResultStatus status);
 
     /** "Ranked out of N". */

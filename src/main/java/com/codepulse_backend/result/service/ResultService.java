@@ -199,6 +199,28 @@ public class ResultService {
         }
     }
 
+    /**
+     * A deleted candidate leaves every leaderboard, published ones included, and the
+     * remaining candidates are re-ranked to close the gap.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void removeCandidateResults(UUID candidateId) {
+        List<UUID> contestIds = resultRepository.findAllByCandidateId(candidateId).stream()
+                .map(Result::getContestId)
+                .distinct()
+                .toList();
+        for (UUID contestId : contestIds) {
+            lockContest(contestId);
+            resultRepository.findByContestIdAndCandidateId(contestId, candidateId).ifPresent(result -> {
+                scoreRepository.deleteAllByResultId(result.getId());
+                resultRepository.delete(result);
+                resultRepository.flush();
+            });
+            rerank(contestId);
+        }
+        resultRepository.flush();
+    }
+
     // ─── Publish ─────────────────────────────────────────────────────────────
 
     @Transactional
