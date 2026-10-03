@@ -24,10 +24,7 @@ services:
 
   # ── Judge0 CE (self-hosted code execution engine) ─────────────────────────
   judge0-server:
-    # judge0/judge0:1.13.1 plus isolate 2.2 so the sandbox works on cgroup v2
-    # (Docker Desktop / WSL2). Built locally from ./judge0 on first `up`.
-    build: ./judge0
-    image: codepulse/judge0:1.13.1-isolate2
+    image: judge0/judge0:1.13.1
     container_name: codepulse-judge0-server
     ports:
       - "2358:2358"
@@ -42,8 +39,7 @@ services:
       - judge0-redis
 
   judge0-worker:
-    build: ./judge0
-    image: codepulse/judge0:1.13.1-isolate2
+    image: judge0/judge0:1.13.1
     container_name: codepulse-judge0-worker
     command: ["./scripts/workers"]
     volumes:
