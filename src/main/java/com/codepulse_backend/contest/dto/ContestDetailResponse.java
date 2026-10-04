@@ -18,5 +18,7 @@ public record ContestDetailResponse(
         ContestStatus status,
         long candidateCount,
         Instant createdAt,
-        List<UserSummaryResponse> candidates  // null for CANDIDATE role (scoped via backend)
+        List<UserSummaryResponse> candidates,  // null for CANDIDATE role (scoped via backend)
+        boolean resultsPublished,          // Module 9
+        Instant resultsPublishedAt
 ) {}

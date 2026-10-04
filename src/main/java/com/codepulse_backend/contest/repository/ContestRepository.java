@@ -4,12 +4,15 @@ import com.codepulse_backend.common.enums.ContestStatus;
 import com.codepulse_backend.contest.entity.Contest;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface ContestRepository extends JpaRepository<Contest, UUID> {
@@ -37,4 +40,12 @@ public interface ContestRepository extends JpaRepository<Contest, UUID> {
 
     // Scheduler: ONGOING contests whose end_time has now passed
     List<Contest> findAllByStatusAndEndTimeBefore(ContestStatus status, Instant now);
+
+    /**
+     * Module 9: every result write takes this lock first, so recomputes, publish and
+     * manual evaluations in one contest are serialized (lock order: contest, then results).
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT c FROM Contest c WHERE c.id = :id")
+    Optional<Contest> findByIdForUpdate(@Param("id") UUID id);
 }

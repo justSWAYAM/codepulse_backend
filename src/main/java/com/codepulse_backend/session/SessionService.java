@@ -4,6 +4,10 @@ import com.codepulse_backend.auth.security.CustomUserDetails;
 import com.codepulse_backend.common.audit.AuditService;
 import com.codepulse_backend.common.enums.ContestCandidateStatus;
 import com.codepulse_backend.common.enums.ContestStatus;
+import com.codepulse_backend.common.exception.AccessDeniedException;
+import com.codepulse_backend.common.exception.InvalidStateException;
+import com.codepulse_backend.common.exception.ResourceNotFoundException;
+import com.codepulse_backend.common.exception.UnauthorizedException;
 import com.codepulse_backend.contest.entity.Contest;
 import com.codepulse_backend.contest.entity.ContestCandidate;
 import com.codepulse_backend.contest.repository.ContestCandidateRepository;
@@ -36,45 +40,47 @@ public class SessionService {
     private final ApplicationEventPublisher eventPublisher;
     private final Clock clock;
 
-    @Transactional
+    /*
+     * noRollbackFor: the expired-resume branch finalizes the session and then throws.
+     * Without this the exception would roll the finalization back. (Calling the
+     * REQUIRES_NEW autoSubmitExpiredSession() from here doesn't help — it's a
+     * self-invocation, so Spring's proxy never applies the new transaction.)
+     */
+    @Transactional(noRollbackFor = InvalidStateException.class)
     public SessionStartResponse startSession(UUID contestId) {
         User candidate = getCurrentUser();
 
         Contest contest = contestRepository.findById(contestId)
-                .orElseThrow(() -> new IllegalArgumentException("Contest not found"));
-
-        if (contest.getStatus() != ContestStatus.ONGOING) {
-            throw new IllegalStateException("The contest is not currently ongoing");
-        }
+                .orElseThrow(() -> new ResourceNotFoundException("Contest not found with id: " + contestId));
 
         ContestCandidate assignment = contestCandidateRepository
                 .findByContestIdAndCandidateIdForUpdate(contestId, candidate.getId())
-                .orElseThrow(() -> new IllegalStateException(
+                .orElseThrow(() -> new AccessDeniedException(
                         "You are not assigned to this contest"
                 ));
+
+        if (contest.getStatus() != ContestStatus.ONGOING) {
+            throw new InvalidStateException("The contest is not currently ongoing");
+        }
 
         Instant now = Instant.now(clock);
 
         var existingSession = sessionRepository
-                .findByContestIdAndCandidateId(contestId, candidate.getId());
+                .findByContestIdAndCandidateIdForUpdate(contestId, candidate.getId());
 
         if (existingSession.isPresent()) {
             AssessmentSession session = existingSession.get();
 
             if (session.getStatus() == SessionStatus.IN_PROGRESS) {
                 if (!now.isBefore(session.getEndsAt())) {
-                    /*
-                     * Finalize through a separate transaction. The subsequent
-                     * exception from this method must not roll back finalization.
-                     */
-                    autoSubmitExpiredSession(session.getId());
-                    throw new IllegalStateException("Your assessment time has expired");
+                    finalizeSession(session, SessionStatus.AUTO_SUBMITTED, now);
+                    throw new InvalidStateException("Your assessment time has expired");
                 }
 
                 return toStartResponse(session,true);
             }
 
-            throw new IllegalStateException("You have already completed this assessment");
+            throw new InvalidStateException("You have already completed this assessment");
         }
 
         Instant endsAt = now.plusSeconds(contest.getDurationMinutes() * 60L);
@@ -84,7 +90,7 @@ public class SessionService {
         }
 
         if (!endsAt.isAfter(now)) {
-            throw new IllegalStateException("The contest has already ended");
+            throw new InvalidStateException("The contest has already ended");
         }
 
         AssessmentSession session = new AssessmentSession();
@@ -122,8 +128,10 @@ public class SessionService {
 
         Instant now = Instant.now(clock);
 
+        // Locked read: this may finalize the session, and must not race the
+        // auto-submit scheduler or an explicit submit (double finalize / event)
         Optional<AssessmentSession> optionalSession =
-                sessionRepository.findByContestIdAndCandidateId(
+                sessionRepository.findByContestIdAndCandidateIdForUpdate(
                         contestId,
                         candidate.getId()
                 );
@@ -155,23 +163,12 @@ public class SessionService {
     public SessionResponse submitSession(UUID contestId) {
         User candidate = getCurrentUser();
 
-        AssessmentSession existingSession = sessionRepository
-                .findByContestIdAndCandidateId(contestId, candidate.getId())
-                .orElseThrow(() -> new IllegalArgumentException(
-                        "Assessment session not found"
-                ));
-
+        // Scoped to the current candidate, so this is also the ownership check
         AssessmentSession session = sessionRepository
-                .findByIdForUpdate(existingSession.getId())
-                .orElseThrow(() -> new IllegalArgumentException(
+                .findByContestIdAndCandidateIdForUpdate(contestId, candidate.getId())
+                .orElseThrow(() -> new ResourceNotFoundException(
                         "Assessment session not found"
                 ));
-
-        // Re-check ownership after acquiring the lock.
-        if (!session.getContestId().equals(contestId)
-                || !session.getCandidateId().equals(candidate.getId())) {
-            throw new IllegalArgumentException("Assessment session not found");
-        }
 
         if (session.getStatus() != SessionStatus.IN_PROGRESS) {
             return toResponse(session);
@@ -262,18 +259,18 @@ public class SessionService {
                 SecurityContextHolder.getContext().getAuthentication();
 
         if (authentication == null || !authentication.isAuthenticated()) {
-            throw new IllegalStateException("User is not authenticated");
+            throw new UnauthorizedException("User is not authenticated");
         }
 
         Object principal = authentication.getPrincipal();
 
         if (principal instanceof CustomUserDetails userDetails) {
             return userRepository.findById(userDetails.getId())
-                    .orElseThrow(() -> new IllegalArgumentException("User not found"));
+                    .orElseThrow(() -> new UnauthorizedException("Authenticated user not found"));
         }
 
         return userRepository.findByEmail(authentication.getName())
-                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+                .orElseThrow(() -> new UnauthorizedException("Authenticated user not found"));
     }
 
     private SessionStartResponse toStartResponse(
@@ -338,5 +335,21 @@ public class SessionService {
                 SessionStatus.AUTO_SUBMITTED,
                 Instant.now(clock)
         );
+    }
+
+    @Transactional(readOnly = true)
+    public AssessmentSession requireActiveSession(UUID contestId, UUID candidateId) {
+        AssessmentSession session = sessionRepository.findByContestIdAndCandidateId(contestId, candidateId)
+                .orElseThrow(() -> new AccessDeniedException("No active assessment session"));
+        
+        if (session.getStatus() != SessionStatus.IN_PROGRESS) {
+            throw new InvalidStateException("Assessment session is not in progress");
+        }
+        
+        if (!Instant.now(clock).isBefore(session.getEndsAt())) {
+            throw new InvalidStateException("Assessment session has expired");
+        }
+        
+        return session;
     }
 }

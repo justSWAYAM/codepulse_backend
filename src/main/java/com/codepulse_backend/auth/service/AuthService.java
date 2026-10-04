@@ -5,7 +5,6 @@ import com.codepulse_backend.auth.dto.LoginResponse;
 import com.codepulse_backend.auth.dto.RefreshResponse;
 import com.codepulse_backend.auth.entity.RefreshToken;
 import com.codepulse_backend.auth.repository.RefreshTokenRepository;
-import com.codepulse_backend.common.exception.ResourceNotFoundException;
 import com.codepulse_backend.common.exception.UnauthorizedException;
 import com.codepulse_backend.user.User;
 import com.codepulse_backend.user.dto.UserSummary;
@@ -40,15 +39,17 @@ public class AuthService {
 
     @Transactional
     public LoginResponse login(LoginRequest request, HttpServletResponse response) {
-        User user = userRepository.findByEmail(request.email())
-                .orElseThrow(() -> new ResourceNotFoundException("User not found with email: " + request.email()));
-
-        if (!user.isActive()) {
-            throw new DisabledException("User account is inactive");
-        }
+        // Same error for unknown email and wrong password, so login can't be used to probe which emails exist
+        User user = userRepository.findFirstByEmailIgnoreCase(request.email().trim())
+                .orElseThrow(() -> new UnauthorizedException("Invalid email or password"));
 
         if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
             throw new UnauthorizedException("Invalid email or password");
+        }
+
+        // Checked after the password so account status is only revealed to the account owner
+        if (!user.isActive()) {
+            throw new DisabledException("User account is inactive");
         }
 
         String accessToken = jwtService.generateAccessToken(user);
@@ -89,11 +90,15 @@ public class AuthService {
             throw new UnauthorizedException("Refresh token is expired or revoked");
         }
 
+        User user = refreshToken.getUser();
+        if (!user.isActive()) {
+            throw new DisabledException("User account is inactive");
+        }
+
         // Token Rotation
         refreshToken.setRevoked(true);
         refreshTokenRepository.save(refreshToken);
 
-        User user = refreshToken.getUser();
         String newAccessToken = jwtService.generateAccessToken(user);
         String newRawRefreshToken = jwtService.generateRefreshToken(user);
         String newTokenHash = jwtService.hashRefreshToken(newRawRefreshToken);

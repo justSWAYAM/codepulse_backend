@@ -81,6 +81,13 @@ public interface SubmissionRepository
             @Param("maxAttempts") int maxAttempts
     );
 
+    /** Stale PENDING rows that have used up their queue attempts. */
+    List<Submission> findByStatusAndQueueAttemptsGreaterThanEqualAndQueuedAtBefore(
+            SubmissionStatus status,
+            int maxAttempts,
+            Instant cutoff
+    );
+
     /**
      * Best SUBMIT per question for a session.
      *
@@ -95,7 +102,7 @@ public interface SubmissionRepository
         WHERE session_id = :sessionId
           AND submission_type = 'SUBMIT'
           AND status NOT IN ('PENDING', 'SYSTEM_ERROR')
-        ORDER BY question_id, score DESC, submitted_at ASC
+        ORDER BY question_id, score DESC NULLS LAST, submitted_at ASC
         """, nativeQuery = true)
     List<Submission> findCountedSubmissions(
             @Param("sessionId") UUID sessionId
@@ -116,5 +123,29 @@ public interface SubmissionRepository
             @Param("type") SubmissionType type,
             @Param("status") SubmissionStatus status,
             Pageable pageable
+    );
+
+    /** Module 9 readiness: sessions in a contest that have a SUBMIT in the given status. */
+    @Query("""
+        SELECT DISTINCT s.sessionId FROM Submission s
+        WHERE s.sessionId IN (SELECT a.id FROM AssessmentSession a WHERE a.contestId = :contestId)
+          AND s.submissionType = :type
+          AND s.status = :status
+        """)
+    List<UUID> findSessionIdsInContestWithStatus(
+            @Param("contestId") UUID contestId,
+            @Param("type") SubmissionType type,
+            @Param("status") SubmissionStatus status
+    );
+
+    /** Module 9 detail view: SUBMIT attempts per question in a session, with their statuses. */
+    @Query("""
+        SELECT s.questionId, s.status, COUNT(s) FROM Submission s
+        WHERE s.sessionId = :sessionId AND s.submissionType = :type
+        GROUP BY s.questionId, s.status
+        """)
+    List<Object[]> countBySessionGroupedByQuestionAndStatus(
+            @Param("sessionId") UUID sessionId,
+            @Param("type") SubmissionType type
     );
 }

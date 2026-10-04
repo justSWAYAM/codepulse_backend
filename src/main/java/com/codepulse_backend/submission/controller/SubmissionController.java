@@ -5,7 +5,7 @@ import com.codepulse_backend.common.dto.PagedResponse;
 import com.codepulse_backend.common.enums.SubmissionStatus;
 import com.codepulse_backend.common.enums.SubmissionType;
 import com.codepulse_backend.submission.dto.RunCodeRequest;
-import com.codepulse_backend.submission.dto.SubmissionDetailResponse;
+import com.codepulse_backend.submission.dto.ContestSubmissionRowResponse;
 import com.codepulse_backend.submission.dto.SubmissionSummaryResponse;
 import com.codepulse_backend.submission.dto.SubmitCodeRequest;
 import com.codepulse_backend.submission.service.SubmissionService;
@@ -28,20 +28,18 @@ public class SubmissionController {
     private final SubmissionService submissionService;
 
     @PostMapping("/api/submissions/run")
+    @PreAuthorize("hasRole('CANDIDATE')")
     public ResponseEntity<?> run(
             Authentication authentication,
             @Valid @RequestBody RunCodeRequest request
     ) {
         UUID candidateId = getCandidateId(authentication);
 
-        var submission = submissionService.run(candidateId, request);
-
-        return ResponseEntity.ok(
-                SubmissionSummaryResponse.from(submission, false)
-        );
+        return ResponseEntity.ok(submissionService.run(candidateId, request).view());
     }
 
     @PostMapping("/api/submissions/submit")
+    @PreAuthorize("hasRole('CANDIDATE')")
     public ResponseEntity<?> submit(
             Authentication authentication,
             @Valid @RequestBody SubmitCodeRequest request
@@ -55,14 +53,14 @@ public class SubmissionController {
     }
 
     @GetMapping("/api/submissions/{submissionId}")
-    public ResponseEntity<SubmissionDetailResponse> getSubmission(
+    public ResponseEntity<?> getSubmission(
             Authentication authentication,
             @PathVariable UUID submissionId
     ) {
-        UUID candidateId = getCandidateId(authentication);
+        UUID viewerId = getCandidateId(authentication);
 
         return ResponseEntity.ok(
-                submissionService.getSubmission(candidateId, submissionId)
+                submissionService.getSubmission(authentication, viewerId, submissionId)
         );
     }
 
@@ -71,6 +69,7 @@ public class SubmissionController {
     public ResponseEntity<PagedResponse<SubmissionSummaryResponse>> getMyHistory(
             Authentication authentication,
             @PathVariable UUID questionId,
+            @RequestParam(required = false) SubmissionType type,
             @PageableDefault(
                     sort = "submittedAt",
                     direction = Sort.Direction.DESC
@@ -83,6 +82,7 @@ public class SubmissionController {
                 submissionService.getMyHistory(
                         candidateId,
                         questionId,
+                        type,
                         pageable
                 )
         );
@@ -90,12 +90,17 @@ public class SubmissionController {
 
     @GetMapping("/api/contests/{contestId}/submissions")
     @PreAuthorize("hasAnyRole('EVALUATOR', 'ADMIN')")
-    public ResponseEntity<PagedResponse<SubmissionSummaryResponse>> listContestSubmissions(
+    public ResponseEntity<PagedResponse<ContestSubmissionRowResponse>> listContestSubmissions(
             @PathVariable UUID contestId,
             @RequestParam(required = false) UUID candidateId,
             @RequestParam(required = false) UUID questionId,
             @RequestParam(required = false) SubmissionType type,
             @RequestParam(required = false) SubmissionStatus status,
+            @PageableDefault(
+                    size = 20,
+                    sort = "submittedAt",
+                    direction = Sort.Direction.DESC
+            )
             Pageable pageable) {
 
         return ResponseEntity.ok(
@@ -113,9 +118,10 @@ public class SubmissionController {
     @PostMapping("/api/submissions/{id}/rejudge")
     @PreAuthorize("hasAnyRole('EVALUATOR', 'ADMIN')")
     public ResponseEntity<Void> rejudgeSubmission(
+            Authentication authentication,
             @PathVariable UUID id
     ) {
-        submissionService.rejudge(id);
+        submissionService.rejudge(id, getCandidateId(authentication));
         return ResponseEntity.accepted().build();
     }
 

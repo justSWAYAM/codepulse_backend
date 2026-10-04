@@ -9,8 +9,9 @@ import com.codepulse_backend.submission.entity.Submission;
 import com.codepulse_backend.submission.entity.SubmissionTestCaseResult;
 import com.codepulse_backend.testcase.entity.TestCase;
 import com.codepulse_backend.testcase.repository.TestCaseRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -45,9 +46,9 @@ class SubmissionMapperTest {
         sampleTestCaseId = UUID.randomUUID();
         hiddenTestCaseId = UUID.randomUUID();
     }
-    @Disabled
+
     @Test
-    void candidateViewMustNotExposeExpectedOutputOrHiddenDetails() {
+    void candidateViewMustNotExposeExpectedOutputOrHiddenDetails() throws Exception {
         Submission submission = createSubmission();
 
         SubmissionTestCaseResult sampleResult =
@@ -99,10 +100,17 @@ class SubmissionMapperTest {
         assertEquals(1, view.hiddenSummary().passed());
         assertEquals(1, view.hiddenSummary().total());
 
-        String serializedView = view.toString();
+        // Assert on the JSON a candidate actually receives, not on toString():
+        // random UUIDs made the old substring check for "30" flaky.
+        String json = new ObjectMapper()
+                .registerModule(new JavaTimeModule())
+                .writeValueAsString(view);
 
-        assertFalse(serializedView.contains("30"));
-        assertFalse(serializedView.contains("10 20"));
+        assertFalse(json.contains("expectedOutput"));
+        assertFalse(json.contains("10 20"));      // hidden input
+        assertFalse(json.contains("\"30\""));    // hidden expected output
+        assertFalse(json.contains("hidden-actual-output"));
+        assertFalse(json.contains("hidden stderr"));
     }
 
     @Test
@@ -210,7 +218,7 @@ class SubmissionMapperTest {
         result.setTestCaseId(testCaseId);
         result.setSample(sample);
         result.setStatus(status);
-        result.setActualOutput(sample ? "5" : "999");
+        result.setActualOutput(sample ? "5" : "hidden-actual-output");
         result.setStderr(sample ? "" : "hidden stderr");
         result.setExecutionTimeMs(new BigDecimal("12.50"));
         result.setMemoryUsedKb(1000);

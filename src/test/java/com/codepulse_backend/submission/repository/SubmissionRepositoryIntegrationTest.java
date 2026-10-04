@@ -22,8 +22,10 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.test.context.transaction.AfterTransaction;
 import org.springframework.test.context.transaction.TestTransaction;
 
 import java.math.BigDecimal;
@@ -47,9 +49,35 @@ class SubmissionRepositoryIntegrationTest {
     @Autowired
     private SubmissionPersistenceService submissionPersistenceService;
 
+    @Autowired
+    private JdbcTemplate jdbc;
+
+    // Set only by tests that commit their setup data; removed in deleteCommittedData().
+    private UUID committedContestId;
+    private UUID committedCandidateId;
+
     @AfterEach
     void clearSecurityContext() {
         SecurityContextHolder.clearContext();
+    }
+
+    @AfterTransaction
+    void deleteCommittedData() {
+        if (committedContestId == null) {
+            return;
+        }
+        UUID id = committedContestId;
+        jdbc.update("DELETE FROM result_question_scores WHERE result_id IN (SELECT id FROM results WHERE contest_id = ?)", id);
+        jdbc.update("DELETE FROM results WHERE contest_id = ?", id);
+        jdbc.update("DELETE FROM manual_evaluations WHERE session_id IN (SELECT id FROM assessment_sessions WHERE contest_id = ?)", id);
+        jdbc.update("DELETE FROM submission_test_case_results WHERE submission_id IN (SELECT s.id FROM submissions s JOIN assessment_sessions a ON a.id = s.session_id WHERE a.contest_id = ?)", id);
+        jdbc.update("DELETE FROM submissions WHERE session_id IN (SELECT id FROM assessment_sessions WHERE contest_id = ?)", id);
+        jdbc.update("DELETE FROM assessment_sessions WHERE contest_id = ?", id);
+        jdbc.update("DELETE FROM contests WHERE id = ?", id);
+        jdbc.update("DELETE FROM audit_logs WHERE actor_id = ?", committedCandidateId);
+        jdbc.update("DELETE FROM users WHERE id = ?", committedCandidateId);
+        committedContestId = null;
+        committedCandidateId = null;
     }
 
     @Test
@@ -321,6 +349,9 @@ class SubmissionRepositoryIntegrationTest {
         // Commit all setup data
         // REQUIRES_NEW must be able to see it
         // ---------------------------------------------------------
+        committedContestId = contest.getId();
+        committedCandidateId = candidate.getId();
+
         TestTransaction.flagForCommit();
         TestTransaction.end();
 

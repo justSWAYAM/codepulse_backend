@@ -12,6 +12,7 @@ import com.codepulse_backend.contest.entity.Contest;
 import com.codepulse_backend.contest.entity.ContestCandidate;
 import com.codepulse_backend.contest.repository.ContestCandidateRepository;
 import com.codepulse_backend.contest.repository.ContestRepository;
+import com.codepulse_backend.session.AssessmentSessionRepository;
 import com.codepulse_backend.user.User;
 import com.codepulse_backend.user.dto.UserSummaryResponse;
 import com.codepulse_backend.user.repository.UserRepository;
@@ -38,7 +39,9 @@ public class ContestService {
     private final ContestRepository contestRepository;
     private final ContestCandidateRepository contestCandidateRepository;
     private final UserRepository userRepository;
+    private final AssessmentSessionRepository assessmentSessionRepository;
     private final AuditService auditService;
+    private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     // ─── Create ───────────────────────────────────────────────────────────────
 
@@ -77,7 +80,11 @@ public class ContestService {
             throw new InvalidStateException("Only DRAFT contests can be updated. Current status: " + contest.getStatus());
         }
 
-        if (request.title() != null)            contest.setTitle(request.title());
+        if (request.title() != null && request.title().isBlank()) {
+            throw new InvalidStateException("Title must not be blank");
+        }
+
+        if (request.title() != null)            contest.setTitle(request.title().trim());
         if (request.description() != null)      contest.setDescription(request.description());
         if (request.startTime() != null)        contest.setStartTime(request.startTime());
         if (request.endTime() != null)          contest.setEndTime(request.endTime());
@@ -88,8 +95,35 @@ public class ContestService {
         if (!contest.getEndTime().isAfter(contest.getStartTime())) {
             throw new InvalidStateException("End time must be after start time");
         }
+        if ((request.startTime() != null || request.endTime() != null)
+                && !contest.getStartTime().isAfter(Instant.now())) {
+            throw new InvalidStateException("Start time must be in the future");
+        }
 
         return toContestResponse(contestRepository.save(contest));
+    }
+
+    // ─── Delete ───────────────────────────────────────────────────────────────
+
+    /**
+     * Questions, test cases and candidate assignments cascade in the DB. Sessions and
+     * submissions don't, so contests that have started (and hold exam records) are kept.
+     */
+    @Transactional
+    public void deleteContest(UUID id) {
+        Contest contest = findContestById(id);
+        User currentUser = getCurrentAuthenticatedUser();
+
+        if (contest.getStatus() == ContestStatus.ONGOING || contest.getStatus() == ContestStatus.COMPLETED) {
+            throw new InvalidStateException("Only DRAFT or PUBLISHED contests can be deleted. Current status: " + contest.getStatus());
+        }
+        if (assessmentSessionRepository.existsByContestId(id)) {
+            throw new InvalidStateException("Contest has exam sessions and can't be deleted");
+        }
+
+        contestRepository.delete(contest);
+        auditService.log(currentUser.getId(), "CONTEST_DELETED", "CONTEST", id,
+                "Admin deleted contest: " + contest.getTitle());
     }
 
     // ─── Publish ──────────────────────────────────────────────────────────────
@@ -106,6 +140,10 @@ public class ContestService {
         long candidateCount = contestCandidateRepository.countByContestId(id);
         if (candidateCount == 0) {
             throw new InvalidStateException("Cannot publish a contest with no candidates assigned");
+        }
+
+        if (!contest.getStartTime().isAfter(Instant.now())) {
+            throw new InvalidStateException("Cannot publish a contest whose start time has passed. Update the schedule first.");
         }
 
         contest.setStatus(ContestStatus.PUBLISHED);
@@ -127,9 +165,13 @@ public class ContestService {
 
         if (currentUser.getRole() == Role.CANDIDATE) {
             // Candidates see only their assigned contests (PUBLISHED + ONGOING only by default)
-            List<ContestStatus> visibleStatuses = statusFilter != null
-                    ? List.of(statusFilter)
-                    : List.of(ContestStatus.PUBLISHED, ContestStatus.ONGOING);
+            // DRAFT contests are never visible to candidates, even if explicitly requested
+            List<ContestStatus> visibleStatuses = statusFilter == null
+                    ? List.of(ContestStatus.PUBLISHED, ContestStatus.ONGOING)
+                    : statusFilter == ContestStatus.DRAFT ? List.of() : List.of(statusFilter);
+            if (visibleStatuses.isEmpty()) {
+                return new PagedResponse<>(List.of(), pageable.getPageNumber(), pageable.getPageSize(), 0, 0);
+            }
             page = contestRepository.findAllByCandidateIdAndStatusIn(
                     currentUser.getId(), visibleStatuses, pageable);
         } else {
@@ -161,6 +203,9 @@ public class ContestService {
             if (!isAssigned) {
                 throw new AccessDeniedException("You are not assigned to this contest");
             }
+            if (contest.getStatus() == ContestStatus.DRAFT) {
+                throw new ResourceNotFoundException("Contest not found with id: " + id);
+            }
         }
 
         List<UserSummaryResponse> candidates = null;
@@ -185,7 +230,9 @@ public class ContestService {
                 contest.getStatus(),
                 candidateCount,
                 contest.getCreatedAt(),
-                candidates
+                candidates,
+                contest.isResultsPublished(),
+                contest.getResultsPublishedAt()
         );
     }
 
@@ -195,6 +242,10 @@ public class ContestService {
     public AssignCandidatesResult assignCandidates(UUID contestId, AssignCandidatesRequest request) {
         Contest contest = findContestById(contestId);
         User currentUser = getCurrentAuthenticatedUser();
+
+        if (contest.getStatus() == ContestStatus.COMPLETED) {
+            throw new InvalidStateException("Candidates cannot be assigned to a COMPLETED contest");
+        }
 
         int assignedCount = 0;
         int alreadyAssignedCount = 0;
@@ -213,10 +264,10 @@ public class ContestService {
 
             User candidate = candidateOpt.get();
 
-            if (candidate.getRole() != Role.CANDIDATE) {
+            if (candidate.getRole() != Role.CANDIDATE || !candidate.isActive()) {
                 notFoundCount++;
                 failedIds.add(candidateId);
-                log.warn("User {} is not a CANDIDATE — skipping assignment", candidateId);
+                log.warn("User {} is not an active CANDIDATE — skipping assignment", candidateId);
                 continue;
             }
 
@@ -237,6 +288,36 @@ public class ContestService {
                 String.format("%d candidates assigned to contest %s", assignedCount, contest.getTitle()));
 
         return new AssignCandidatesResult(assignedCount, alreadyAssignedCount, notFoundCount, failedIds);
+    }
+
+    // ─── Unassign Candidates ──────────────────────────────────────────────────
+
+    @Transactional
+    public UnassignCandidatesResult unassignCandidates(UUID contestId, UnassignCandidatesRequest request) {
+        Contest contest = findContestById(contestId);
+        User currentUser = getCurrentAuthenticatedUser();
+
+        if (contest.getStatus() != ContestStatus.DRAFT) {
+            throw new InvalidStateException("Candidates can only be unassigned from a DRAFT contest. Current status: " + contest.getStatus());
+        }
+
+        int removedCount = 0;
+        int notAssignedCount = 0;
+
+        for (UUID candidateId : request.candidateIds()) {
+            Optional<ContestCandidate> assignment = contestCandidateRepository.findByContestIdAndCandidateId(contestId, candidateId);
+            if (assignment.isEmpty()) {
+                notAssignedCount++;
+                continue;
+            }
+            contestCandidateRepository.delete(assignment.get());
+            removedCount++;
+        }
+
+        auditService.log(currentUser.getId(), "CANDIDATES_UNASSIGNED", "CONTEST", contestId,
+                String.format("%d candidates unassigned from contest %s", removedCount, contest.getTitle()));
+
+        return new UnassignCandidatesResult(removedCount, notAssignedCount);
     }
 
     // ─── Get Assigned Candidates ──────────────────────────────────────────────
@@ -261,6 +342,7 @@ public class ContestService {
     public void transitionToCompleted(Contest contest) {
         contest.setStatus(ContestStatus.COMPLETED);
         contestRepository.save(contest);
+        eventPublisher.publishEvent(new com.codepulse_backend.contest.event.ContestCompletedEvent(contest.getId()));
     }
 
     // ─── Private Helpers ──────────────────────────────────────────────────────
@@ -289,7 +371,9 @@ public class ContestService {
                 contest.getAllowedLanguages(),
                 contest.getStatus(),
                 candidateCount,
-                contest.getCreatedAt()
+                contest.getCreatedAt(),
+                contest.isResultsPublished(),
+                contest.getResultsPublishedAt()
         );
     }
 

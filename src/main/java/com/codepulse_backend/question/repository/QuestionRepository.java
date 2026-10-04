@@ -30,6 +30,13 @@ public interface QuestionRepository extends JpaRepository<Question, UUID> {
     long countByContestId(UUID contestId);
 
     /**
+     * Highest order_index in a contest (0 if empty). Used instead of count() when appending,
+     * because deletes leave gaps and count+1 would collide with the unique (contest_id, order_index) index.
+     */
+    @Query("SELECT COALESCE(MAX(q.orderIndex), 0) FROM Question q WHERE q.contestId = :contestId")
+    int findMaxOrderIndexByContestId(@Param("contestId") UUID contestId);
+
+    /**
      * Fetch only the questions being reordered, in one query.
      * Used by the reorder endpoint to validate all IDs belong to the contest.
      */

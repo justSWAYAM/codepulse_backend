@@ -6,7 +6,6 @@ import com.codepulse_backend.auth.dto.RefreshResponse;
 import com.codepulse_backend.auth.entity.RefreshToken;
 import com.codepulse_backend.auth.repository.RefreshTokenRepository;
 import com.codepulse_backend.common.exception.AppException;
-import com.codepulse_backend.common.exception.ResourceNotFoundException;
 import com.codepulse_backend.user.User;
 import com.codepulse_backend.user.repository.UserRepository;
 import jakarta.servlet.http.Cookie;
@@ -20,6 +19,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpHeaders;
+import com.codepulse_backend.common.exception.UnauthorizedException;
 import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -88,7 +88,7 @@ class AuthServiceTest {
     void login_correctCredentials_returnsResponseAndSetsCookie() {
         LoginRequest request = new LoginRequest("dev@codepulse.dev", "Password@123");
 
-        when(userRepository.findByEmail("dev@codepulse.dev")).thenReturn(Optional.of(mockUser));
+        when(userRepository.findFirstByEmailIgnoreCase("dev@codepulse.dev")).thenReturn(Optional.of(mockUser));
         when(passwordEncoder.matches("Password@123", "hashed_password")).thenReturn(true);
         when(jwtService.generateAccessToken(mockUser)).thenReturn("access_token_jwt");
         when(jwtService.generateRefreshToken(any(User.class))).thenReturn("raw_refresh_token");
@@ -108,20 +108,20 @@ class AuthServiceTest {
     void login_wrongPassword_throwsUnauthorizedException() {
         LoginRequest request = new LoginRequest("dev@codepulse.dev", "WrongPassword");
 
-        when(userRepository.findByEmail("dev@codepulse.dev")).thenReturn(Optional.of(mockUser));
+        when(userRepository.findFirstByEmailIgnoreCase("dev@codepulse.dev")).thenReturn(Optional.of(mockUser));
         when(passwordEncoder.matches("WrongPassword", "hashed_password")).thenReturn(false);
 
         assertThrows(AppException.class, () -> authService.login(request, httpResponse));
     }
 
     @Test
-    @DisplayName("Login with unknown email -> throws ResourceNotFoundException")
-    void login_unknownEmail_throwsResourceNotFoundException() {
+    @DisplayName("Login with unknown email -> throws UnauthorizedException (no email enumeration)")
+    void login_unknownEmail_throwsUnauthorizedException() {
         LoginRequest request = new LoginRequest("unknown@codepulse.dev", "Password@123");
 
-        when(userRepository.findByEmail("unknown@codepulse.dev")).thenReturn(Optional.empty());
+        when(userRepository.findFirstByEmailIgnoreCase("unknown@codepulse.dev")).thenReturn(Optional.empty());
 
-        assertThrows(ResourceNotFoundException.class, () -> authService.login(request, httpResponse));
+        assertThrows(UnauthorizedException.class, () -> authService.login(request, httpResponse));
     }
 
     @Test
@@ -130,7 +130,8 @@ class AuthServiceTest {
         mockUser.setActive(false);
         LoginRequest request = new LoginRequest("dev@codepulse.dev", "Password@123");
 
-        when(userRepository.findByEmail("dev@codepulse.dev")).thenReturn(Optional.of(mockUser));
+        when(userRepository.findFirstByEmailIgnoreCase("dev@codepulse.dev")).thenReturn(Optional.of(mockUser));
+        when(passwordEncoder.matches("Password@123", "hashed_password")).thenReturn(true);
 
         assertThrows(DisabledException.class, () -> authService.login(request, httpResponse));
     }

@@ -1,7 +1,11 @@
 package com.codepulse_backend.question.dto;
 
 import com.codepulse_backend.common.enums.Difficulty;
+import com.codepulse_backend.testcase.dto.CreateTestCaseRequest;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
+
+import java.util.List;
 
 public record CreateQuestionRequest(
 
@@ -24,6 +28,9 @@ public record CreateQuestionRequest(
         int timeLimitMs,
 
         @Min(value = 4096, message = "Memory limit must be at least 4096 KB (4 MB)")
-        @Max(value = 1048576, message = "Memory limit must not exceed 1048576 KB (1 GB)")
-        int memoryLimitKb
+        @Max(value = 512000, message = "Memory limit must not exceed 512000 KB (500 MB), the judge maximum")
+        int memoryLimitKb,
+
+        // Optional: test cases drafted on the create page, saved together with the question
+        List<@NotNull @Valid CreateTestCaseRequest> testCases
 ) {}

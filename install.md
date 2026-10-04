@@ -45,7 +45,8 @@ DB_PORT=5432
 DB_NAME=codepulse
 DB_USER=codepulse
 DB_PASSWORD=codepulse_local
-JWT_SECRET=your-super-secret-key-at-least-256-bits-long
+JWT_ACCESS_SECRET=<base64, at least 256 bits>
+JWT_REFRESH_SECRET=<base64, at least 256 bits>
 JUDGE0_BASE_URL=http://localhost:2358
 EOF
 ```

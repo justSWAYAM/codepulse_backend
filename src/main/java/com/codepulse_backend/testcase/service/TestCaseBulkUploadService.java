@@ -27,11 +27,8 @@ public class TestCaseBulkUploadService {
             UUID questionId,
             MultipartFile file
     ) {
-        if (!questionRepository.existsById(questionId)) {
-            throw new ResourceNotFoundException(
-                    "Question not found with id: " + questionId
-            );
-        }
+        // Fail the whole upload up front rather than once per row
+        testCaseService.assertQuestionEditable(questionId);
 
         CsvImportResult result = csvImportService.processGeneric(
                 file,

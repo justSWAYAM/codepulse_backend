@@ -69,6 +69,13 @@ public class UserController {
         return new ApiResponse<>(true, reactivatedUser, "User reactivated successfully", Instant.now(), null);
     }
 
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<Void> deleteUser(@PathVariable UUID id) {
+        userService.deleteUser(id);
+        return new ApiResponse<>(true, null, "User deleted successfully", Instant.now(), null);
+    }
+
     @PostMapping("/bulk-import")
     @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<BulkImportResult> bulkImportUsers(@RequestParam("file") MultipartFile file) {

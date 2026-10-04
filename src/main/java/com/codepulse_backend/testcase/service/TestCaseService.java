@@ -4,6 +4,7 @@ import com.codepulse_backend.common.audit.AuditService;
 import com.codepulse_backend.common.enums.ContestStatus;
 import com.codepulse_backend.common.enums.Role;
 import com.codepulse_backend.common.exception.AccessDeniedException;
+import com.codepulse_backend.common.exception.InvalidStateException;
 import com.codepulse_backend.common.exception.ResourceNotFoundException;
 import com.codepulse_backend.contest.entity.Contest;
 import com.codepulse_backend.contest.repository.ContestCandidateRepository;
@@ -38,6 +39,7 @@ public class TestCaseService {
     private final ContestCandidateRepository contestCandidateRepository;
     private final UserRepository userRepository;
     private final AuditService auditService;
+    private final com.codepulse_backend.session.SessionService sessionService;
 
     // ─── Create ───────────────────────────────────────────────────────────────
 
@@ -46,13 +48,9 @@ public class TestCaseService {
             UUID questionId,
             CreateTestCaseRequest request) {
 
-        if (!questionRepository.existsById(questionId)) {
-            throw new ResourceNotFoundException(
-                    "Question not found with id: " + questionId
-            );
-        }
+        assertQuestionEditable(questionId);
 
-        int orderIndex = (int) testCaseRepository.countByQuestionId(questionId) + 1;
+        int orderIndex = testCaseRepository.findMaxOrderIndexByQuestionId(questionId) + 1;
 
         TestCase testCase = TestCase.builder()
                 .questionId(questionId)
@@ -84,6 +82,20 @@ public class TestCaseService {
         return toAdminResponse(saved);
     }
 
+    /** Test cases follow the same freeze rule as their question's contest. */
+    public void assertQuestionEditable(UUID questionId) {
+        Contest contest = questionRepository.findById(questionId)
+                .flatMap(question -> contestRepository.findById(question.getContestId()))
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Question not found with id: " + questionId
+                ));
+
+        if (contest.getStatus() == ContestStatus.ONGOING || contest.getStatus() == ContestStatus.COMPLETED) {
+            throw new InvalidStateException(
+                    "Test cases cannot be changed once a contest is " + contest.getStatus());
+        }
+    }
+
     // ─── Delete ───────────────────────────────────────────────────────────────
 
     @Transactional
@@ -92,6 +104,8 @@ public class TestCaseService {
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "Test case not found with id: " + testCaseId
                 ));
+
+        assertQuestionEditable(testCase.getQuestionId());
 
         User currentUser = getCurrentUser();
 
@@ -144,6 +158,8 @@ public class TestCaseService {
                         "Test cases are only accessible when the contest is ongoing"
                 );
             }
+
+            sessionService.requireActiveSession(contestId, currentUser.getId());
 
             // Candidate path: fetch only sample cases from the database.
             return testCaseRepository

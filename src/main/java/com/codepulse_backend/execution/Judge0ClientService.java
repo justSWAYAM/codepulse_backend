@@ -4,13 +4,22 @@ import com.codepulse_backend.config.Judge0Properties;
 import com.codepulse_backend.execution.dto.Judge0StatusResponse;
 import com.codepulse_backend.execution.dto.Judge0SubmissionRequest;
 import com.codepulse_backend.common.exception.Judge0IntegrationException;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.util.Map;
 
+/**
+ * Judge0 is polled (wait=false + GET by token) rather than using wait=true,
+ * so one slow program never pins a Judge0 HTTP worker.
+ */
+@Slf4j
 @Service
 public class Judge0ClientService {
+
+    private static final long SUBMIT_RETRY_BACKOFF_MS = 500;
 
     private final WebClient judge0WebClient;
     private final Judge0Properties properties;
@@ -36,8 +45,10 @@ public class Judge0ClientService {
                         .uri(uriBuilder -> uriBuilder
                                 .path("/submissions")
                                 .queryParam("wait", false)
+                                .queryParam("base64_encoded", true)
                                 .build())
-                        .bodyValue(request)
+                        // Base64 keeps non-UTF-8 program output from breaking Judge0's JSON
+                        .bodyValue(request.base64Encoded())
                         .retrieve()
                         .bodyToMono(Map.class)
                         .block();
@@ -52,12 +63,19 @@ public class Judge0ClientService {
 
             } catch (Exception e) {
 
-                if (attempts >= 2) {
+                // A 4xx means the request itself is bad; retrying will not help.
+                boolean clientError = e instanceof WebClientResponseException wcre
+                        && wcre.getStatusCode().is4xxClientError();
+
+                if (attempts >= 2 || clientError) {
                     throw new Judge0IntegrationException(
                             "Failed to submit code to Judge0",
                             e
                     );
                 }
+
+                log.warn("Judge0 submit failed, retrying once: {}", e.getMessage());
+                sleepBeforeRetry();
             }
         }
 
@@ -67,10 +85,18 @@ public class Judge0ClientService {
     }
 
     public Judge0StatusResponse pollResult(String token) {
+        return pollResult(token, properties.getMaxPollAttempts() * properties.getPollIntervalMs());
+    }
 
-        for (int attempt = 1;
-             attempt <= properties.getMaxPollAttempts();
-             attempt++) {
+    /**
+     * Polls until Judge0 reports a final status or {@code budgetMs} runs out.
+     * The caller sizes the budget from the test case's time limits plus queue time.
+     */
+    public Judge0StatusResponse pollResult(String token, long budgetMs) {
+
+        long deadline = System.currentTimeMillis() + budgetMs;
+
+        while (true) {
 
             Judge0StatusResponse response;
 
@@ -83,6 +109,7 @@ public class Judge0ClientService {
                                         "fields",
                                         "token,status,stdout,stderr,compile_output,time,memory"
                                 )
+                                .queryParam("base64_encoded", true)
                                 .build(token))
                         .retrieve()
                         .bodyToMono(Judge0StatusResponse.class)
@@ -102,13 +129,15 @@ public class Judge0ClientService {
             }
 
             int statusId = response.status().id();
-            System.out.println(
-                    "JUDGE0 STATUS -> id=" + statusId +
-                            ", description=" + response.status().description()
-            );
+            log.debug("Judge0 token={} status id={} ({})",
+                    token, statusId, response.status().description());
 
             if (statusId >= 3) {
-                return response;
+                return response.base64Decoded();
+            }
+
+            if (System.currentTimeMillis() + properties.getPollIntervalMs() > deadline) {
+                break;
             }
 
             try {
@@ -126,5 +155,14 @@ public class Judge0ClientService {
         throw new Judge0IntegrationException(
                 "Execution timed out"
         );
+    }
+
+    private void sleepBeforeRetry() {
+        try {
+            Thread.sleep(SUBMIT_RETRY_BACKOFF_MS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new Judge0IntegrationException("Judge0 retry was interrupted", e);
+        }
     }
 }

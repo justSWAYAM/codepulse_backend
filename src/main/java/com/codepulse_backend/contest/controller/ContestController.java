@@ -56,6 +56,13 @@ public class ContestController {
         return new ApiResponse<>(true, updated, "Contest updated successfully", Instant.now(), null);
     }
 
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<Void> deleteContest(@PathVariable UUID id) {
+        contestService.deleteContest(id);
+        return new ApiResponse<>(true, null, "Contest deleted successfully", Instant.now(), null);
+    }
+
     @PostMapping("/{id}/publish")
     @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<ContestResponse> publishContest(@PathVariable UUID id) {
@@ -70,6 +77,15 @@ public class ContestController {
             @Valid @RequestBody AssignCandidatesRequest request) {
         AssignCandidatesResult result = contestService.assignCandidates(id, request);
         return new ApiResponse<>(true, result, "Candidates assigned", Instant.now(), null);
+    }
+
+    @DeleteMapping("/{id}/candidates")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<UnassignCandidatesResult> unassignCandidates(
+            @PathVariable UUID id,
+            @Valid @RequestBody UnassignCandidatesRequest request) {
+        UnassignCandidatesResult result = contestService.unassignCandidates(id, request);
+        return new ApiResponse<>(true, result, "Candidates unassigned", Instant.now(), null);
     }
 
     @GetMapping("/{id}/candidates")

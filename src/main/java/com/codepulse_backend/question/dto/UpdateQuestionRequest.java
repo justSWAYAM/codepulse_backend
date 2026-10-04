@@ -10,8 +10,10 @@ import jakarta.validation.constraints.*;
 public record UpdateQuestionRequest(
 
         @Size(max = 255, message = "Title must not exceed 255 characters")
+        @Pattern(regexp = "(?s).*\\S.*", message = "Title must not be blank")
         String title,
 
+        @Pattern(regexp = "(?s).*\\S.*", message = "Description must not be blank")
         String description,
 
         Difficulty difficulty,
@@ -25,6 +27,6 @@ public record UpdateQuestionRequest(
         Integer timeLimitMs,
 
         @Min(value = 4096, message = "Memory limit must be at least 4096 KB (4 MB)")
-        @Max(value = 1048576, message = "Memory limit must not exceed 1048576 KB (1 GB)")
+        @Max(value = 512000, message = "Memory limit must not exceed 512000 KB (500 MB), the judge maximum")
         Integer memoryLimitKb
 ) {}

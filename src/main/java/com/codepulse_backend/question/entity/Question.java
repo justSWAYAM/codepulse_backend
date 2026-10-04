@@ -9,7 +9,12 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 import java.util.UUID;
 
 @Entity
-@Table(name = "questions")
+// Mirrors ux_questions_contest_order from V6 so the H2 test schema enforces it too
+@Table(name = "questions",
+       uniqueConstraints = @UniqueConstraint(
+           name = "ux_questions_contest_order",
+           columnNames = {"contest_id", "order_index"}
+       ))
 @EntityListeners(AuditingEntityListener.class)
 @Getter
 @Setter

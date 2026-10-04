@@ -72,7 +72,10 @@ class ExecutionWorkerTest {
                 new ExecutionWorker(
                         queueService,
                         executionService,
-                        eventPublisher
+                        eventPublisher,
+                        anySubmission -> true,
+                        Runnable::run, // synchronous, so assertions see the finished job
+                        4
                 );
 
         worker.processQueue();
@@ -105,7 +108,10 @@ class ExecutionWorkerTest {
                 new ExecutionWorker(
                         queueService,
                         executionService,
-                        eventPublisher
+                        eventPublisher,
+                        anySubmission -> true,
+                        Runnable::run, // synchronous, so assertions see the finished job
+                        4
                 );
 
         worker.processQueue();
@@ -178,7 +184,10 @@ class ExecutionWorkerTest {
                 new ExecutionWorker(
                         queueService,
                         executionService,
-                        eventPublisher
+                        eventPublisher,
+                        anySubmission -> true,
+                        Runnable::run, // synchronous, so assertions see the finished job
+                        4
                 );
 
         worker.processQueue();
@@ -210,5 +219,59 @@ class ExecutionWorkerTest {
                 TestCaseResultStatus.PASSED,
                 event.outcomes().get(0).status()
         );
+    }
+
+    @Test
+    void neverRunsMoreJobsAtOnceThanTheConcurrencyLimit() throws Exception {
+
+        SubmissionQueueService queueService = mock(SubmissionQueueService.class);
+        CodeExecutionService executionService = mock(CodeExecutionService.class);
+        ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
+
+        java.util.concurrent.atomic.AtomicInteger running = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.atomic.AtomicInteger peak = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+
+        // Six jobs waiting; each execution blocks until the test lets it finish
+        java.util.Deque<QueuedSubmissionJob> queue = new java.util.ArrayDeque<>();
+        for (int i = 0; i < 6; i++) {
+            queue.add(new QueuedSubmissionJob(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                    "print(1)", "PYTHON",
+                    List.of(new QueuedSubmissionJob.TestCasePayload(UUID.randomUUID(), "", "1", 1000, 256000))));
+        }
+        when(queueService.pop()).thenAnswer(inv -> queue.poll());
+        when(executionService.execute(any(ExecutionRequest.class))).thenAnswer(inv -> {
+            peak.accumulateAndGet(running.incrementAndGet(), Math::max);
+            release.await(5, java.util.concurrent.TimeUnit.SECONDS);
+            running.decrementAndGet();
+            return new ExecutionResult(TestCaseResultStatus.PASSED, "1", null, null, 1L, 100L);
+        });
+
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(8);
+        try {
+            ExecutionWorker worker = new ExecutionWorker(
+                    queueService, executionService, eventPublisher, anySubmission -> true, pool, 2);
+
+            worker.processQueue();
+            Thread.sleep(300);
+
+            // Two slots: two jobs running, the other four still waiting in the queue
+            assertEquals(2, running.get());
+            assertEquals(4, queue.size());
+
+            release.countDown();
+            for (int i = 0; i < 20 && !queue.isEmpty(); i++) {
+                Thread.sleep(100);
+                worker.processQueue();
+            }
+            pool.shutdown();
+            assertTrue(pool.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS));
+
+            assertEquals(2, peak.get());
+            assertTrue(queue.isEmpty());
+            verify(eventPublisher, times(6)).publishEvent(any(SubmissionEvaluatedEvent.class));
+        } finally {
+            pool.shutdownNow();
+        }
     }
 }

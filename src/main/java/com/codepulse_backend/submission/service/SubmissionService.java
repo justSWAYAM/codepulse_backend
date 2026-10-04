@@ -1,7 +1,17 @@
 package com.codepulse_backend.submission.service;
 import com.codepulse_backend.common.dto.PagedResponse;
+import com.codepulse_backend.common.audit.AuditService;
+import com.codepulse_backend.common.exception.BadRequestException;
+import com.codepulse_backend.common.exception.ConflictException;
+import com.codepulse_backend.common.exception.ExecutionBusyException;
 import com.codepulse_backend.common.exception.SubmissionQueueUnavailableException;
-import com.codepulse_backend.submission.dto.SubmissionDetailResponse;
+import com.codepulse_backend.submission.dto.ContestSubmissionRowResponse;
+import com.codepulse_backend.user.User;
+import com.codepulse_backend.user.repository.UserRepository;
+import org.springframework.security.core.Authentication;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import com.codepulse_backend.submission.dto.SubmissionSummaryResponse;
 import com.codepulse_backend.submission.entity.SubmissionTestCaseResult;
 import java.util.List;
@@ -12,6 +22,7 @@ import com.codepulse_backend.common.enums.SupportedLanguage;
 import com.codepulse_backend.common.exception.InvalidStateException;
 import com.codepulse_backend.common.exception.ResourceNotFoundException;
 import com.codepulse_backend.config.SubmissionProperties;
+import com.codepulse_backend.result.service.ResultVisibilityService;
 import com.codepulse_backend.contest.entity.Contest;
 import com.codepulse_backend.contest.repository.ContestRepository;
 import com.codepulse_backend.execution.CodeExecutionService;
@@ -56,6 +67,12 @@ public class SubmissionService {
     private final RunConcurrencyLimiter concurrencyLimiter;
     private final SubmissionProperties properties;
     private final SubmissionTestCaseResultRepository submissionTestCaseResultRepository;
+    private final SubmissionMapper submissionMapper;
+    private final SubmissionAccessGuard accessGuard;
+    private final UserRepository userRepository;
+    private final AuditService auditService;
+    private final org.springframework.context.ApplicationEventPublisher eventPublisher;
+    private final ResultVisibilityService resultVisibility;
 
     public SubmissionService(
             QuestionRepository questionRepository,
@@ -69,7 +86,13 @@ public class SubmissionService {
             CodeExecutionService executionService,
             ScoringService scoringService,
             RunConcurrencyLimiter concurrencyLimiter,
-            SubmissionProperties properties
+            SubmissionProperties properties,
+            SubmissionMapper submissionMapper,
+            SubmissionAccessGuard accessGuard,
+            UserRepository userRepository,
+            AuditService auditService,
+            org.springframework.context.ApplicationEventPublisher eventPublisher,
+            ResultVisibilityService resultVisibility
     ) {
         this.questionRepository = questionRepository;
         this.contestRepository = contestRepository;
@@ -83,6 +106,12 @@ public class SubmissionService {
         this.scoringService = scoringService;
         this.concurrencyLimiter = concurrencyLimiter;
         this.properties = properties;
+        this.submissionMapper = submissionMapper;
+        this.accessGuard = accessGuard;
+        this.userRepository = userRepository;
+        this.auditService = auditService;
+        this.eventPublisher = eventPublisher;
+        this.resultVisibility = resultVisibility;
     }
 
     /**
@@ -92,7 +121,7 @@ public class SubmissionService {
      * Question.timeLimitMs
      * Question.memoryLimitKb
      */
-    public Submission run(
+    public RunOutcome run(
             UUID candidateId,
             RunCodeRequest request
     ) {
@@ -110,11 +139,12 @@ public class SubmissionService {
                         );
 
         if (testCases.isEmpty()) {
-            throw new InvalidStateException("NO_SAMPLE_TEST_CASES");
+            throw new ConflictException("NO_SAMPLE_TEST_CASES",
+                    "This question has no sample test cases to run against");
         }
 
         if (!concurrencyLimiter.tryAcquire()) {
-            throw new InvalidStateException("EXECUTION_BUSY");
+            throw new ExecutionBusyException("EXECUTION_BUSY");
         }
 
         Instant submittedAt = Instant.now();
@@ -223,7 +253,7 @@ public class SubmissionService {
                     )
                     .count();
 
-            return persistenceService.saveCompletedRun(
+            Submission saved = persistenceService.saveCompletedRun(
                     context.session().getId(),
                     context.question().getId(),
                     candidateId,
@@ -237,10 +267,18 @@ public class SubmissionService {
                     persistedResults
             );
 
+            // Run returns the sample outputs directly; no follow-up GET needed
+            return new RunOutcome(saved, submissionMapper.toCandidateView(saved, persistedResults, true));
+
         } finally {
             concurrencyLimiter.release();
         }
     }
+
+    public record RunOutcome(
+            Submission submission,
+            com.codepulse_backend.submission.dto.SubmissionCandidateView view
+    ) {}
 
     public Submission submit(
             UUID candidateId,
@@ -253,19 +291,6 @@ public class SubmissionService {
                 SubmissionType.SUBMIT
         );
 
-        boolean pendingExists =
-                submissionRepository
-                        .existsBySessionIdAndQuestionIdAndSubmissionTypeAndStatus(
-                                context.session().getId(),
-                                request.questionId(),
-                                SubmissionType.SUBMIT,
-                                SubmissionStatus.PENDING
-                        );
-
-        if (pendingExists) {
-            throw new InvalidStateException("SUBMISSION_IN_PROGRESS");
-        }
-
         List<TestCase> testCases =
                 testCaseRepository
                         .findByQuestionIdOrderByOrderIndexAsc(
@@ -273,13 +298,14 @@ public class SubmissionService {
                         );
 
         if (testCases.isEmpty()) {
-            throw new InvalidStateException(
-                    "QUESTION_HAS_NO_TEST_CASES"
-            );
+            throw new ConflictException("QUESTION_HAS_NO_TEST_CASES",
+                    "This question has no test cases, so it cannot be judged");
         }
 
         Instant now = Instant.now();
 
+        // Re-checks deadline, PENDING and the cap under the session row lock, so
+        // double-clicks and session finalization cannot race the insert
         Submission submission =
                 persistenceService.createPendingSubmit(
                         context.session().getId(),
@@ -288,7 +314,9 @@ public class SubmissionService {
                         request.language(),
                         request.sourceCode(),
                         testCases.size(),
-                        now
+                        now,
+                        properties.getGraceSeconds(),
+                        properties.getMaxSubmitPerQuestion()
                 );
 
         List<QueuedSubmissionJob.TestCasePayload> payloads =
@@ -317,9 +345,8 @@ public class SubmissionService {
         try {
             queueService.push(job);
         } catch (Exception e) {
-            persistenceService.markSystemError(
-                    submission.getId()
-            );
+            persistenceService.markSystemError(submission.getId())
+                    .ifPresent(eventPublisher::publishEvent);
 
             throw new SubmissionQueueUnavailableException(
                     "Submission queue is unavailable"
@@ -353,26 +380,10 @@ public class SubmissionService {
 
         AssessmentSession session =
                 sessionRepository
-                        .findByContestIdAndCandidateIdAndStatus(
-                                contest.getId(),
-                                candidateId,
-                                SessionStatus.IN_PROGRESS
-                        )
-                        .orElseThrow(() ->
-                                new InvalidStateException(
-                                        "NO_ACTIVE_SESSION"
-                                )
-                        );
-
-        Instant deadline =
-                session.getEndsAt()
-                        .plusSeconds(properties.getGraceSeconds());
-
-        if (Instant.now().isAfter(deadline)) {
-            throw new InvalidStateException(
-                    "SESSION_DEADLINE_PASSED"
-            );
-        }
+                        .findByContestIdAndCandidateId(contest.getId(), candidateId)
+                        .filter(s -> acceptsWork(s, properties.getGraceSeconds(), Instant.now()))
+                        .orElseThrow(() -> new ConflictException("NO_ACTIVE_SESSION",
+                                "No active exam session for this contest"));
 
         SupportedLanguage supportedLanguage;
 
@@ -380,9 +391,7 @@ public class SubmissionService {
             supportedLanguage =
                     SupportedLanguage.fromName(language);
         } catch (IllegalArgumentException e) {
-            throw new InvalidStateException(
-                    "LANGUAGE_NOT_ALLOWED"
-            );
+            throw new BadRequestException("LANGUAGE_NOT_ALLOWED");
         }
 
         boolean languageAllowed =
@@ -398,9 +407,7 @@ public class SubmissionService {
                         );
 
         if (!languageAllowed) {
-            throw new InvalidStateException(
-                    "LANGUAGE_NOT_ALLOWED"
-            );
+            throw new BadRequestException("LANGUAGE_NOT_ALLOWED");
         }
 
         long count =
@@ -417,9 +424,8 @@ public class SubmissionService {
                         : properties.getMaxSubmitPerQuestion();
 
         if (count >= max) {
-            throw new InvalidStateException(
-                    "SUBMISSION_LIMIT_REACHED"
-            );
+            throw new ConflictException("SUBMISSION_LIMIT_REACHED",
+                    "Limit of " + max + " reached for this question");
         }
 
         return new Context(
@@ -429,37 +435,75 @@ public class SubmissionService {
         );
     }
 
+    /**
+     * A session accepts Run/Submit while IN_PROGRESS and up to graceSeconds past endsAt.
+     * Auto-submit can finalize the session at endsAt (timer poll or scheduler), so an
+     * AUTO_SUBMITTED session still inside the grace window is accepted too; otherwise
+     * the grace would depend on when the scheduler happened to run.
+     */
+    public static boolean acceptsWork(AssessmentSession session, int graceSeconds, Instant now) {
+        boolean open = session.getStatus() == SessionStatus.IN_PROGRESS
+                || session.getStatus() == SessionStatus.AUTO_SUBMITTED;
+        return open && !now.isAfter(session.getEndsAt().plusSeconds(graceSeconds));
+    }
+
     private record Context(
             Question question,
             Contest contest,
             AssessmentSession session
     ) {
     }
-    public SubmissionDetailResponse getSubmission(
-            UUID candidateId,
+    /**
+     * Candidates get their own submission as a candidate view: sample results in full,
+     * hidden test cases only as a passed/total summary. Evaluators and admins get the
+     * full evaluator view. A candidate asking for someone else's submission gets 404,
+     * so submission IDs can't be probed.
+     */
+    public Object getSubmission(
+            Authentication authentication,
+            UUID viewerId,
             UUID submissionId
     ) {
         Submission submission = submissionRepository.findById(submissionId)
                 .orElseThrow(() ->
-                        new InvalidStateException("SUBMISSION_NOT_FOUND")
+                        new ResourceNotFoundException("SUBMISSION_NOT_FOUND")
                 );
-
-        if (!submission.getCandidateId().equals(candidateId)) {
-            throw new InvalidStateException("SUBMISSION_ACCESS_DENIED");
-        }
 
         List<SubmissionTestCaseResult> results =
                 submissionTestCaseResultRepository.findBySubmissionId(submissionId);
 
-        return SubmissionDetailResponse.from(submission, results);
+        if (accessGuard.resolveViewerRole(authentication)
+                != SubmissionAccessGuard.ViewerRole.CANDIDATE) {
+            return submissionMapper.toEvaluatorView(submission, results);
+        }
+
+        accessGuard.assertCandidateOwns(submission, viewerId);
+
+        // Plan 2.10: verdicts are visible while the exam runs; after it ends they stay
+        // hidden until Module 9 publishes results.
+        boolean resultsVisible = sessionRepository.findById(submission.getSessionId())
+                .map(this::verdictsVisible)
+                .orElse(false);
+
+        return submissionMapper.toCandidateView(submission, results, resultsVisible);
     }
+
+    /** While the exam runs, or once Module 9 has published the contest's results. */
+    private boolean verdictsVisible(AssessmentSession session) {
+        return session.getStatus() == SessionStatus.IN_PROGRESS
+                || resultVisibility.isPublished(session.getContestId());
+    }
+
     public PagedResponse<SubmissionSummaryResponse> getMyHistory(
             UUID candidateId,
             UUID questionId,
+            SubmissionType type,
             Pageable pageable
     ) {
-        Page<Submission> page = submissionRepository
-                .findByCandidateIdAndQuestionId(candidateId, questionId, pageable);
+        Page<Submission> page = type == null
+                ? submissionRepository.findByCandidateIdAndQuestionId(candidateId, questionId, pageable)
+                : submissionRepository.findByCandidateIdAndQuestionIdAndSubmissionType(
+                        candidateId, questionId, type, pageable);
 
         UUID countedSubmissionId = null;
         if (!page.isEmpty()) {
@@ -474,12 +518,17 @@ public class SubmissionService {
                     .orElse(null);
         }
 
+        // Plan 2.10: once the session is over, verdicts stay hidden until results are published
+        boolean resultsVisible = page.isEmpty() || sessionRepository
+                .findById(page.getContent().get(0).getSessionId())
+                .map(this::verdictsVisible)
+                .orElse(false);
+
         final UUID finalCountedId = countedSubmissionId;
         List<SubmissionSummaryResponse> content = page.getContent().stream()
-                .map(sub -> SubmissionSummaryResponse.from(
-                        sub,
-                        sub.getId().equals(finalCountedId)
-                ))
+                .map(sub -> resultsVisible
+                        ? SubmissionSummaryResponse.from(sub, sub.getId().equals(finalCountedId))
+                        : SubmissionSummaryResponse.withoutResults(sub))
                 .toList();
 
         return new PagedResponse<>(
@@ -490,9 +539,34 @@ public class SubmissionService {
                 page.getTotalPages()
         );
     }
-    public void rejudge(UUID submissionId) {
+    public void rejudge(UUID submissionId, UUID actorId) {
         Submission submission = persistenceService.prepareForRejudge(submissionId);
 
+        auditService.log(
+                actorId,
+                "SUBMISSION_REJUDGED",
+                "SUBMISSION",
+                submission.getId(),
+                "questionId=" + submission.getQuestionId()
+                        + ", candidateId=" + submission.getCandidateId()
+        );
+
+        try {
+            queueService.push(buildJobFromStored(submission));
+        } catch (Exception e) {
+            persistenceService.markSystemError(submission.getId())
+                    .ifPresent(eventPublisher::publishEvent);
+            throw new SubmissionQueueUnavailableException(
+                    "Submission queue is unavailable"
+            );
+        }
+    }
+
+    /**
+     * Rebuilds a queue job from a stored submission against the question's
+     * current test cases. Used by rejudge and the recovery scheduler.
+     */
+    public QueuedSubmissionJob buildJobFromStored(Submission submission) {
         List<TestCase> testCases = testCaseRepository
                 .findByQuestionIdOrderByOrderIndexAsc(submission.getQuestionId());
 
@@ -511,7 +585,7 @@ public class SubmissionService {
                 ))
                 .toList();
 
-        QueuedSubmissionJob job = new QueuedSubmissionJob(
+        return new QueuedSubmissionJob(
                 submission.getId(),
                 submission.getQuestionId(),
                 submission.getSessionId(),
@@ -519,18 +593,9 @@ public class SubmissionService {
                 submission.getLanguage(),
                 payloads
         );
-
-        try {
-            queueService.push(job);
-        } catch (Exception e) {
-            persistenceService.markSystemError(submission.getId());
-            throw new SubmissionQueueUnavailableException(
-                    "Submission queue is unavailable"
-            );
-        }
     }
 
-    public PagedResponse<SubmissionSummaryResponse> getContestSubmissions(
+    public PagedResponse<ContestSubmissionRowResponse> getContestSubmissions(
             UUID contestId,
             UUID candidateId,
             UUID questionId,
@@ -547,8 +612,20 @@ public class SubmissionService {
                 pageable
         );
 
-        List<SubmissionSummaryResponse> content = page.getContent().stream()
-                .map(sub -> SubmissionSummaryResponse.from(sub, false))
+        List<UUID> candidateIds = page.getContent().stream()
+                .map(Submission::getCandidateId)
+                .distinct()
+                .toList();
+
+        Map<UUID, User> candidates = userRepository.findAllById(candidateIds)
+                .stream()
+                .collect(Collectors.toMap(User::getId, Function.identity()));
+
+        List<ContestSubmissionRowResponse> content = page.getContent().stream()
+                .map(sub -> ContestSubmissionRowResponse.from(
+                        sub,
+                        candidates.get(sub.getCandidateId())
+                ))
                 .toList();
 
         return new PagedResponse<>(

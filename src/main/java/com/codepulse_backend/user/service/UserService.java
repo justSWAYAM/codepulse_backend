@@ -3,14 +3,21 @@ package com.codepulse_backend.user.service;
 import com.codepulse_backend.common.audit.AuditService;
 import com.codepulse_backend.common.dto.PagedResponse;
 import com.codepulse_backend.common.enums.Role;
+import com.codepulse_backend.auth.repository.RefreshTokenRepository;
+import com.codepulse_backend.common.exception.ConflictException;
 import com.codepulse_backend.common.exception.DuplicateResourceException;
+import com.codepulse_backend.common.exception.InvalidStateException;
 import com.codepulse_backend.common.exception.ResourceNotFoundException;
 import com.codepulse_backend.common.exception.UnauthorizedException;
 import com.codepulse_backend.common.util.CsvImportService;
+import com.codepulse_backend.result.service.ResultService;
 import com.codepulse_backend.user.User;
 import com.codepulse_backend.user.dto.*;
+import com.codepulse_backend.user.repository.UserDeletionRepository;
 import com.codepulse_backend.user.repository.UserRepository;
 import com.codepulse_backend.user.repository.UserSpecification;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.Validator;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.csv.CSVRecord;
 import org.springframework.data.domain.Page;
@@ -22,7 +29,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -33,15 +42,23 @@ public class UserService {
     private final PasswordEncoder passwordEncoder;
     private final AuditService auditService;
     private final CsvImportService csvImportService; // Added injection
+    private final Validator validator;
+    private final RefreshTokenRepository refreshTokenRepository;
+    private final UserDeletionRepository userDeletionRepository;
+    private final ResultService resultService;
 
     @Transactional
     public UserSummaryResponse createUser(CreateUserRequest request) {
-        if (userRepository.existsByEmail(request.email())) {
-            throw new DuplicateResourceException("User with email " + request.email() + " already exists");
+        String email = request.email().trim().toLowerCase();
+        if (userRepository.existsByEmailIgnoreCase(email)) {
+            throw new DuplicateResourceException("User with email " + email + " already exists");
+        }
+        if (request.rollNumber() != null && userRepository.existsByRollNumber(request.rollNumber())) {
+            throw new DuplicateResourceException("User with roll number " + request.rollNumber() + " already exists");
         }
 
         User user = User.builder()
-                .email(request.email())
+                .email(email)
                 .fullName(request.fullName())
                 .role(request.role())
                 .passwordHash(passwordEncoder.encode(request.password()))
@@ -66,6 +83,8 @@ public class UserService {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + id));
 
+        guardAdminRemoval(user, request.role() == Role.ADMIN && request.isActive());
+
         user.setRole(request.role());
         user.setActive(request.isActive());
         
@@ -74,7 +93,12 @@ public class UserService {
         if (request.branch() != null) user.setBranch(request.branch());
         if (request.division() != null) user.setDivision(request.division());
         if (request.batch() != null) user.setBatch(request.batch());
-        if (request.rollNumber() != null) user.setRollNumber(request.rollNumber());
+        if (request.rollNumber() != null && !request.rollNumber().equals(user.getRollNumber())) {
+            if (userRepository.existsByRollNumber(request.rollNumber())) {
+                throw new DuplicateResourceException("User with roll number " + request.rollNumber() + " already exists");
+            }
+            user.setRollNumber(request.rollNumber());
+        }
 
         User updatedUser = userRepository.save(user);
 
@@ -104,6 +128,9 @@ public class UserService {
         user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
         userRepository.save(user);
 
+        // A stolen refresh cookie must stop working once the password changes
+        refreshTokenRepository.deleteAllByUserId(user.getId());
+
         auditService.log(user.getId(), "PASSWORD_CHANGED", "USER", user.getId(), "User changed password");
     }
 
@@ -112,7 +139,10 @@ public class UserService {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + id));
 
+        guardAdminRemoval(user, false);
+
         user.setActive(false);
+        refreshTokenRepository.deleteAllByUserId(user.getId());
         User updatedUser = userRepository.save(user);
 
         User admin = getCurrentAuthenticatedUser();
@@ -133,6 +163,36 @@ public class UserService {
         auditService.log(admin.getId(), "USER_REACTIVATED", "USER", updatedUser.getId(), "Admin reactivated user: " + user.getEmail());
 
         return mapToSummary(updatedUser);
+    }
+
+    /**
+     * Hard delete. A candidate's enrolments, sessions, submissions and results go with the
+     * account; anyone whose content other users depend on must be deactivated instead.
+     */
+    @Transactional
+    public void deleteUser(UUID id) {
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + id));
+
+        User admin = getCurrentAuthenticatedUser();
+        if (user.getId().equals(admin.getId())) {
+            throw new InvalidStateException("You cannot delete your own account");
+        }
+        guardAdminRemoval(user, false);
+
+        if (userDeletionRepository.isInAssessment(id)) {
+            throw new ConflictException("USER_IN_ASSESSMENT",
+                    "User has an assessment in progress or a submission being judged. Try again once it finishes");
+        }
+        if (userDeletionRepository.hasAuthoredContent(id)) {
+            throw new ConflictException("USER_HAS_AUTHORED_CONTENT",
+                    "User has created contests, questions, test cases or evaluations. Deactivate the user instead");
+        }
+
+        resultService.removeCandidateResults(id);
+        userDeletionRepository.deleteUserAndAssessmentData(id);
+
+        auditService.log(admin.getId(), "USER_DELETED", "USER", id, "Admin deleted user: " + user.getEmail());
     }
 
     @Transactional(readOnly = true)
@@ -173,7 +233,11 @@ public class UserService {
                     String rollNumber = null;
 
                     if (record.size() >= 5 && !record.get(4).trim().isEmpty()) {
-                        try { year = Integer.parseInt(record.get(4).trim()); } catch(Exception ignored) {}
+                        try {
+                            year = Integer.parseInt(record.get(4).trim());
+                        } catch (NumberFormatException e) {
+                            throw new IllegalArgumentException("year must be a number, got '" + record.get(4).trim() + "'");
+                        }
                     }
                     if (record.size() >= 6) branch = record.get(5).trim().isEmpty() ? null : record.get(5).trim();
                     if (record.size() >= 7) division = record.get(6).trim().isEmpty() ? null : record.get(6).trim();
@@ -190,11 +254,20 @@ public class UserService {
                 },
                 (CreateUserRequest request) -> {
                     // Process row using our existing validation/creation logic
+                    // CSV rows don't pass through @Valid, so apply the same DTO constraints here
+                    Set<ConstraintViolation<CreateUserRequest>> violations = validator.validate(request);
+                    if (!violations.isEmpty()) {
+                        return violations.stream()
+                                .sorted(Comparator.comparing(v -> v.getPropertyPath().toString()))
+                                .map(v -> v.getPropertyPath() + ": " + v.getMessage())
+                                .reduce((a, b) -> a + "; " + b)
+                                .orElse("Invalid row");
+                    }
                     try {
                         createUser(request);
                         return null; // success
                     } catch (DuplicateResourceException e) {
-                        return "Email already exists: " + request.email();
+                        return e.getMessage();
                     } catch (Exception e) {
                         return e.getMessage();
                     }
@@ -203,6 +276,22 @@ public class UserService {
     }
 
     // --- Helper Methods ---
+
+    /**
+     * An admin may not demote or deactivate themselves, and the last active admin
+     * may not be removed: either would lock everyone out of user management.
+     */
+    private void guardAdminRemoval(User target, boolean staysActiveAdmin) {
+        if (target.getRole() != Role.ADMIN || !target.isActive() || staysActiveAdmin) {
+            return;
+        }
+        if (target.getId().equals(getCurrentAuthenticatedUser().getId())) {
+            throw new InvalidStateException("You cannot deactivate, demote or delete your own admin account");
+        }
+        if (userRepository.countByRoleAndIsActiveTrue(Role.ADMIN) <= 1) {
+            throw new InvalidStateException("At least one active admin must remain");
+        }
+    }
 
     private User getCurrentAuthenticatedUser() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();

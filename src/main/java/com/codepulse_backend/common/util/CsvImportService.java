@@ -2,6 +2,7 @@ package com.codepulse_backend.common.util;
 
 import com.codepulse_backend.common.dto.CsvImportResult;
 import com.codepulse_backend.common.dto.RowError;
+import com.codepulse_backend.common.exception.BadRequestException;
 import com.codepulse_backend.user.dto.BulkImportResult;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
@@ -12,6 +13,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -42,6 +44,10 @@ public class CsvImportService {
                      CSVFormat.DEFAULT.builder()
                              .setHeader()
                              .setSkipHeaderRecord(true)
+                             // "Input" / " input " match "input": spreadsheets capitalise
+                             // headers, and the upload preview already ignores case
+                             .setIgnoreHeaderCase(true)
+                             .setTrim(true)
                              .build())) {
 
             for (CSVRecord record : parser) {
@@ -71,11 +77,12 @@ public class CsvImportService {
                 }
             }
 
-        } catch (IOException e) {
-            throw new RuntimeException(
-                    "Failed to read CSV file: " + e.getMessage(),
-                    e
-            );
+        } catch (IOException | UncheckedIOException e) {
+            // e.g. an unterminated quote: commons-csv throws from the record iterator
+            throw new BadRequestException("Could not read the CSV file: " + e.getMessage());
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            // duplicate or empty header names
+            throw new BadRequestException("Invalid CSV header: " + e.getMessage());
         }
 
         return new CsvImportResult(

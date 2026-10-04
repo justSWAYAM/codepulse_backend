@@ -38,4 +38,20 @@ public record SubmissionSummaryResponse(
                 counted
         );
     }
+
+    /** History entry after the session ended: what was sent and when, but no verdict. */
+    public static SubmissionSummaryResponse withoutResults(Submission submission) {
+        return new SubmissionSummaryResponse(
+                submission.getId(),
+                submission.getQuestionId(),
+                submission.getSubmissionType(),
+                submission.getLanguage(),
+                null,
+                null,
+                null,
+                null,
+                submission.getSubmittedAt(),
+                false
+        );
+    }
 }

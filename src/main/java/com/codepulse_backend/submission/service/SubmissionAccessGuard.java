@@ -1,6 +1,8 @@
 package com.codepulse_backend.submission.service;
 
+import com.codepulse_backend.common.exception.InvalidStateException;
 import com.codepulse_backend.common.exception.ResourceNotFoundException;
+import com.codepulse_backend.common.exception.UnauthorizedException;
 import com.codepulse_backend.config.SubmissionProperties;
 import com.codepulse_backend.session.AssessmentSession;
 import com.codepulse_backend.session.SessionStatus;
@@ -35,14 +37,14 @@ public class SubmissionAccessGuard {
         Instant now = Instant.now(clock);
 
         if (session.getStatus() != SessionStatus.IN_PROGRESS) {
-            throw new IllegalStateException("SESSION_NOT_IN_PROGRESS");
+            throw new InvalidStateException("SESSION_NOT_IN_PROGRESS");
         }
 
         Instant deadline = session.getEndsAt()
                 .plusSeconds(properties.getGraceSeconds());
 
         if (now.isAfter(deadline)) {
-            throw new IllegalStateException("SESSION_DEADLINE_PASSED");
+            throw new InvalidStateException("SESSION_DEADLINE_PASSED");
         }
     }
 
@@ -50,7 +52,7 @@ public class SubmissionAccessGuard {
             Authentication authentication
     ) {
         if (authentication == null || !authentication.isAuthenticated()) {
-            throw new IllegalStateException("UNAUTHENTICATED");
+            throw new UnauthorizedException("UNAUTHENTICATED");
         }
 
         boolean admin = authentication.getAuthorities()
