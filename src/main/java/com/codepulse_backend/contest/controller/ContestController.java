@@ -5,6 +5,8 @@ import com.codepulse_backend.common.dto.PagedResponse;
 import com.codepulse_backend.common.enums.ContestStatus;
 import com.codepulse_backend.contest.dto.*;
 import com.codepulse_backend.contest.service.ContestService;
+import com.codepulse_backend.question.dto.AddFromLibraryRequest;
+import com.codepulse_backend.question.service.QuestionLibraryService;
 import com.codepulse_backend.user.dto.UserSummaryResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +25,7 @@ import java.util.UUID;
 public class ContestController {
 
     private final ContestService contestService;
+    private final QuestionLibraryService questionLibraryService;
 
     @GetMapping
     public ApiResponse<PagedResponse<ContestResponse>> listContests(
@@ -93,5 +96,23 @@ public class ContestController {
     public ApiResponse<List<UserSummaryResponse>> getCandidates(@PathVariable UUID id) {
         List<UserSummaryResponse> candidates = contestService.getCandidates(id);
         return new ApiResponse<>(true, candidates, "Candidates retrieved successfully", Instant.now(), null);
+    }
+
+    /**
+     * POST /api/contests/{id}/questions/from-library
+     *
+     * Deep-copies the selected library questions into this contest.
+     * Already-copied questions are silently skipped (idempotent).
+     * The contest must be in DRAFT or PUBLISHED status.
+     * Restricted to ADMIN and EVALUATOR roles.
+     */
+    @PostMapping("/{id}/questions/from-library")
+    @PreAuthorize("hasAnyRole('ADMIN', 'EVALUATOR')")
+    public ApiResponse<Void> addQuestionsFromLibrary(
+            @PathVariable UUID id,
+            @Valid @RequestBody AddFromLibraryRequest request) {
+        int copied = questionLibraryService.addQuestionsToContest(id, request.questionIds());
+        String msg = copied + " question(s) copied to contest from library";
+        return new ApiResponse<>(true, null, msg, Instant.now(), null);
     }
 }

@@ -1,6 +1,9 @@
 package com.codepulse_backend.question.repository;
 
+import com.codepulse_backend.common.enums.QuestionType;
 import com.codepulse_backend.question.entity.Question;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -43,4 +46,31 @@ public interface QuestionRepository extends JpaRepository<Question, UUID> {
     @Query("SELECT q FROM Question q WHERE q.id IN :ids AND q.contestId = :contestId")
     List<Question> findAllByIdInAndContestId(@Param("ids") List<UUID> ids,
                                               @Param("contestId") UUID contestId);
+
+    // ─── Module 5A: Question Library ─────────────────────────────────────────
+
+    /**
+     * Browse the global library (contest_id IS NULL) with optional filtering by
+     * subject folder and/or question type. Supports pagination and sorting.
+     *
+     * Both filter params are nullable — a null value means "no filter on that dimension".
+     */
+    @Query("SELECT q FROM Question q " +
+           "WHERE q.contestId IS NULL " +
+           "AND (:subjectId IS NULL OR q.subject.id = :subjectId) " +
+           "AND (:type IS NULL OR q.questionType = :type)")
+    Page<Question> findLibraryQuestions(
+            @Param("subjectId") UUID subjectId,
+            @Param("type") QuestionType type,
+            Pageable pageable);
+
+    /**
+     * Checks whether the given library question has already been copied into the
+     * given contest. Used by the deep-copy service to skip duplicates.
+     *
+     * @param contestId  the target contest
+     * @param sourceQuestionId the original library question ID
+     */
+    boolean existsByContestIdAndSourceQuestionId(UUID contestId, UUID sourceQuestionId);
 }
+

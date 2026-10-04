@@ -82,12 +82,25 @@ public class TestCaseService {
         return toAdminResponse(saved);
     }
 
-    /** Test cases follow the same freeze rule as their question's contest. */
+    /**
+     * Test cases follow the same freeze rule as their question's contest.
+     * Library questions (contestId = null) are always editable — there is no
+     * running exam to protect.
+     */
     public void assertQuestionEditable(UUID questionId) {
-        Contest contest = questionRepository.findById(questionId)
-                .flatMap(question -> contestRepository.findById(question.getContestId()))
+        Question question = questionRepository.findById(questionId)
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "Question not found with id: " + questionId
+                ));
+
+        // Library questions are not tied to any contest → always editable
+        if (question.getContestId() == null) {
+            return;
+        }
+
+        Contest contest = contestRepository.findById(question.getContestId())
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Contest not found for question: " + questionId
                 ));
 
         if (contest.getStatus() == ContestStatus.ONGOING || contest.getStatus() == ContestStatus.COMPLETED) {
@@ -140,6 +153,12 @@ public class TestCaseService {
         if (currentUser.getRole() == Role.CANDIDATE) {
             UUID contestId = question.getContestId();
 
+            // Library questions (contestId = null) are never accessible to candidates
+            if (contestId == null) {
+                throw new AccessDeniedException(
+                        "Candidates cannot access library questions");
+            }
+
             if (!contestCandidateRepository.existsByContestIdAndCandidateId(
                     contestId,
                     currentUser.getId())) {
@@ -163,6 +182,7 @@ public class TestCaseService {
 
             // Candidate path: fetch only sample cases from the database.
             return testCaseRepository
+
                     .findByQuestionIdAndIsSampleTrueOrderByOrderIndexAsc(questionId)
                     .stream()
                     .map(this::toSampleResponse)
