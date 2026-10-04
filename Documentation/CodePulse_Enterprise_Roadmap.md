@@ -1,50 +1,48 @@
 # CodePulse — Enterprise Implementation Roadmap
 ### Service-Oriented, Module-by-Module Build Plan
 
-**Stack:** React 19 + TS + Vite + Tailwind + shadcn/ui + TanStack Query + Monaco | Spring Boot 3 (Java 21) + Spring Security + Spring Data JPA/Hibernate + Spring WebSocket | PostgreSQL | Redis | Judge0 (self-hosted) | Docker Compose + Nginx on self-hosted Ubuntu | JWT + Refresh Tokens | WebRTC (live only, no recording)
+**Stack:** React 19 + TS + Vite + Tailwind + shadcn/ui + TanStack Query + Monaco | Spring Boot 3 (Java 21) + Spring Security + Spring Data JPA/Hibernate | PostgreSQL | Redis | Judge0 (self-hosted; also runs SQL via SQLite) | Docker Compose + Nginx on self-hosted Ubuntu | JWT + Refresh Tokens
 
 ---
 
 ## How to Use This Document
 
-Each module below is self-contained: purpose, requirements, schema, backend components, frontend components, APIs, relationships, build sequence, dependencies, and a Definition of Done. Work top to bottom — each module's "Dependencies" section tells you what must already be working before you start it. Open this doc daily, find the module you're on, and implement against its checklist. Don't jump ahead to Judge0 or WebRTC before the foundational modules are solid — those two are the highest-risk, highest-payoff parts of the system and deserve a stable base under them.
+Each module below is self-contained: purpose, requirements, schema, backend components, frontend components, APIs, relationships, build sequence, dependencies, and a Definition of Done. Work top to bottom — each module's "Dependencies" section tells you what must already be working before you start it. Open this doc daily, find the module you're on, and implement against its checklist. Don't jump ahead to Judge0 before the foundational modules are solid — it is the highest-risk, highest-payoff part of the system and deserves a stable base under it.
 
 ---
 
 ## 1. System Architecture Overview
 
 ```
-                                   ┌─────────────────────────────┐
-                                   │        Nginx (reverse proxy) │
-                                   │   TLS termination, routing   │
-                                   └───────────┬──────────────────┘
-                                               │
-                      ┌────────────────────────┼─────────────────────────┐
-                      │                        │                         │
-              ┌───────▼────────┐      ┌────────▼─────────┐     ┌─────────▼────────┐
-              │  React 19 SPA   │      │  Spring Boot API  │     │  WebSocket/WebRTC │
-              │  (Vite build,   │◄────►│  (REST + Security  │◄───►│  Signaling         │
-              │  served static  │ REST │  + Business Logic) │ WS  │  (same Spring app  │
-              │  via Nginx)     │      │                    │     │  or dedicated      │
-              └─────────────────┘      └─────┬───────┬──────┘     │  module)           │
-                                              │       │            └────────────────────┘
-                                    ┌─────────▼─┐   ┌─▼──────────┐
-                                    │ PostgreSQL │   │   Redis     │
-                                    │ (primary   │   │ (Judge0     │
-                                    │  data)     │   │  queue,     │
-                                    └────────────┘   │  session/   │
-                                                      │  presence   │
-                                                      │  cache)     │
-                                                      └─────┬───────┘
-                                                            │
-                                                    ┌───────▼────────┐
-                                                    │ Judge0 (Docker) │
-                                                    │ Self-hosted     │
-                                                    │ code execution  │
-                                                    └─────────────────┘
+                         ┌──────────────────────────────┐
+                         │    Nginx (reverse proxy)      │
+                         │    TLS termination, routing   │
+                         └───────────────┬───────────────┘
+                                         │
+                      ┌──────────────────┴─────────────────┐
+                      │                                    │
+              ┌───────▼────────┐                  ┌────────▼─────────┐
+              │  React 19 SPA   │◄──── REST ─────►│  Spring Boot API  │
+              │  (Vite build,   │                  │  (REST + Security │
+              │  served static  │                  │  + Business Logic)│
+              │  via Nginx)     │                  └─────┬───────┬─────┘
+              └─────────────────┘                        │       │
+                                              ┌──────────▼─┐   ┌─▼───────────┐
+                                              │ PostgreSQL  │   │   Redis      │
+                                              │ (primary    │   │ (Judge0      │
+                                              │  data)      │   │  queue,      │
+                                              └─────────────┘   │  session     │
+                                                                 │  cache)      │
+                                                                 └──────┬───────┘
+                                                                        │
+                                                                ┌───────▼────────┐
+                                                                │ Judge0 (Docker) │
+                                                                │ Self-hosted     │
+                                                                │ code + SQL exec │
+                                                                └─────────────────┘
 ```
 
-**Deployment topology:** everything (Spring Boot app, PostgreSQL, Redis, Judge0 stack, Nginx) runs as separate Docker Compose services on one Ubuntu server (your laptop). Nginx is the single entry point, reverse-proxying `/api/**` to Spring Boot, `/ws/**` to the WebSocket endpoint, and serving the built React static files directly.
+**Deployment topology:** everything (Spring Boot app, PostgreSQL, Redis, Judge0 stack, Nginx) runs as separate Docker Compose services on one Ubuntu server (your laptop). Nginx is the single entry point, reverse-proxying `/api/**` to Spring Boot and serving the built React static files directly.
 
 ---
 
@@ -66,11 +64,11 @@ Build these **before** Module 1. Everything else depends on this layer being sol
 | Logging config (Logback + SLF4J) | JSON-structured logs, correlation ID in every line, separate log levels per package, rolling file appender. Log every state transition (submission created → queued → executed → scored). |
 | Bean Validation setup | `@Valid` on all request DTOs; custom validators for things like `@ValidTimeRange` (contest start < end), `@ValidLanguageId` (must exist in supported languages list). |
 | `AuditLog` entity + `AuditService` | Cross-cutting: logs who did what (created contest, published result, evaluated submission) — required for a "professional evaluation platform" narrative and useful in your report. |
-| `RedisConfig` | Shared connection factory + `RedisTemplate` bean, reused by Judge0 queue tracking, session/presence cache, and rate limiting. |
+| `RedisConfig` | Shared connection factory + `RedisTemplate` bean, reused by Judge0 queue tracking, session cache, and rate limiting. |
 | `SecurityConfig` skeleton | Base `SecurityFilterChain`, JWT filter registration, CORS config, public vs protected endpoint matcher list — built once in Module 1, extended (not rebuilt) by every later module. |
 | `RateLimitingFilter` | Simple Redis-backed token bucket per user/IP — protects `/auth/login` and `/submissions/run` from abuse. |
 | `application-{profile}.yml` | `local`, `docker`, `prod` profiles — DB URLs, Judge0 base URL, Redis host, JWT secret (via env var, never hardcoded), CORS origins. |
-| Common enums | `Role`, `ContestStatus`, `SubmissionStatus`, `TestCaseResultStatus`, `SessionStatus` — centralize in a `com.codepulse.common.enums` package, referenced everywhere, single source of truth. |
+| Common enums | `Role`, `ContestStatus`, `SubmissionStatus`, `TestCaseResultStatus`, `SessionStatus`, `QuestionType` — centralize in a `com.codepulse.common.enums` package, referenced everywhere, single source of truth. |
 
 ### 2.2 Frontend Shared Components
 
@@ -99,7 +97,7 @@ Your proposed order is fundamentally sound and follows correct dependency direct
 - **User Management merged conceptually with Authentication** (Modules 2–3 in your list): in practice these two are built almost simultaneously — you can't test auth without users existing, and user CRUD needs auth to protect it. Keeping them as two *documented* modules is fine (as below), just don't expect a clean handoff between them; build them together.
 - **Testing moved from "only at the end" to continuous**, with Module 16 ("Testing") being specifically **integration/E2E/load testing** of the whole system, not the first time you write a test. Each module below includes its own testing expectations in its Definition of Done.
 
-Final order used below: **Foundation → Auth → User Mgmt → Contest → Question → Test Case → Assessment Session → Judge0 Execution → Submission → Result/Evaluation → Analytics → WebSocket → WebRTC Signaling → Live Monitoring Dashboard → Deployment → Integration Testing → Documentation.**
+Final order used below: **Foundation → Auth → User Mgmt → Contest → Question → Test Case → Question Library → Bulk Question Import → Assessment Session → Judge0 Execution → Submission → MCQ & Theory Questions → SQL Questions → Result/Evaluation → Analytics → Deployment → Integration Testing → Documentation.**
 
 ---
 
@@ -232,10 +230,12 @@ Final order used below: **Foundation → Auth → User Mgmt → Contest → Ques
 **Purpose:** Core entity around which everything else revolves — an exam/contest with a time window, allowed languages, and candidate roster.
 
 **Functional Requirements**
-- [ ] Admin creates a contest: title, description, start time, end time, duration, allowed languages, status
+- [ ] Admin creates a contest: title, description, start time, end time, duration, allowed languages (used by DSA questions only), status
+- [ ] A contest is type-agnostic: it can mix DSA, SQL, MCQ and THEORY questions freely (type lives on each question)
 - [ ] Contest lifecycle: `DRAFT → PUBLISHED → ONGOING → COMPLETED`
 - [ ] Admin assigns/invites candidates to a contest
 - [ ] Contest listing filtered by role (Candidate sees only assigned contests; Admin sees all)
+- [ ] Publish is blocked until the contest is ready (`ContestReadinessValidator`): at least 1 question, every DSA/SQL question has at least 1 test case, every MCQ question has 2+ options and 1+ correct answer. Failure returns `CONTEST_NOT_READY` listing the offending questions.
 
 **Database Tables**
 - `contests` (id, title, description, start_time, end_time, duration_minutes, allowed_languages, status, created_by FK, created_at)
@@ -287,8 +287,9 @@ Final order used below: **Foundation → Auth → User Mgmt → Contest → Ques
 - [ ] Admin can create a contest and assign 3+ candidates
 - [ ] Contest auto-transitions to ONGOING at start time and COMPLETED at end time (verify with a short test contest, e.g. 2-minute window)
 - [ ] Candidate only sees contests they're assigned to; Admin sees all
+- [ ] Publishing a contest that has a DSA/SQL question without test cases is rejected, with the question named
 
-**Future Enhancements:** Contest templates/duplication, public contest links (self-registration), proctoring rule configuration per contest (e.g., "webcam required: yes/no").
+**Future Enhancements:** Contest templates/duplication, public contest links (self-registration).
 
 ---
 
@@ -299,15 +300,18 @@ Final order used below: **Foundation → Auth → User Mgmt → Contest → Ques
 **Functional Requirements**
 - [ ] Admin adds questions to a contest: title, description (markdown/rich text), difficulty, points, time/memory limits
 - [ ] Reorder questions within a contest
-- [ ] Duplicate a question across contests (reuse question bank)
+- [ ] Question types: `DSA` (default, existing behavior), `SQL`, `MCQ`, `THEORY` — still one `questions` table; type-specific fields are nullable columns
+- [ ] Reuse across contests is handled by the Question Library (Module 5A), not here
 
 **Database Tables**
-- `questions` (id, contest_id FK, title, description, difficulty, points, time_limit_ms, memory_limit_kb, order_index, created_by, created_at)
+- `questions` (id, contest_id FK **nullable** (NULL = library question), title, description, difficulty, points, time_limit_ms, memory_limit_kb, order_index, created_by, created_at, **question_type** DEFAULT 'DSA', **subject_id** FK null, **source_question_id** FK null, **schema_sql** null, **order_matters** null, **model_answer** null)
+- `mcq_options` (id, question_id FK, text, is_correct, order_index) — MCQ only
+- Migration `V2__question_library_and_types.sql` backfills `question_type='DSA'` on existing rows; no existing DSA query changes.
 
 **Backend Components**
 - **Entities:** `Question`
 - **Repositories:** `QuestionRepository`
-- **DTOs:** `CreateQuestionRequest`, `QuestionResponse`, `QuestionDetailResponse` (includes sample test cases, excludes hidden ones for candidate-facing variant — **two DTOs are important here**: `QuestionAdminView` vs `QuestionCandidateView`, to guarantee hidden test cases can never leak via a shared serializer)
+- **DTOs:** `CreateQuestionRequest`, `QuestionResponse`, `QuestionDetailResponse` (includes sample test cases, excludes hidden ones for candidate-facing variant — **two DTOs are important here**: `QuestionAdminView` vs `QuestionCandidateView`, to guarantee hidden test cases can never leak via a shared serializer — the same split hides MCQ `is_correct` and theory `model_answer`)
 - **Services:** `QuestionService`
 - **Controllers:** `QuestionController` (`/api/contests/{contestId}/questions/**`)
 - **Security Components:** Admin write; Candidate read restricted to contests they're assigned to and only during the assessment window (enforced via `ContestService` check)
@@ -329,7 +333,8 @@ Final order used below: **Foundation → Auth → User Mgmt → Contest → Ques
 | PATCH | `/api/contests/{contestId}/questions/reorder` | Reorder | Admin |
 
 **Database Relationships**
-- `questions.contest_id` → `contests.id`
+- `questions.contest_id` → `contests.id` (nullable; NULL = library question, see Module 5A)
+- `mcq_options.question_id` → `questions.id`
 
 **Sequence of Implementation**
 1. `Question` entity + CRUD.
@@ -342,8 +347,10 @@ Final order used below: **Foundation → Auth → User Mgmt → Contest → Ques
 **Definition of Done**
 - [ ] Admin can author a question with full details
 - [ ] Candidate-facing question detail endpoint never includes hidden test cases at the serialization level (test this explicitly — write a test that asserts the field is absent, not just hidden in UI)
+- [ ] Existing DSA questions load and behave identically after the migration (regression)
+- [ ] Candidate-facing MCQ view never includes `is_correct` (same absence test)
 
-**Future Enhancements:** Question bank/tagging (topics: DP, graphs, etc.), difficulty-based auto point allocation, question versioning.
+**Future Enhancements:** Tagging (topics: DP, graphs, etc.), difficulty-based auto point allocation, question versioning.
 
 ---
 
@@ -355,6 +362,25 @@ Final order used below: **Foundation → Auth → User Mgmt → Contest → Ques
 - [ ] Admin adds test cases per question: input, expected output, weight, sample vs hidden flag
 - [ ] Bulk upload test cases (reuse `CsvImportService` pattern from Module 2, or a zip of input/output file pairs — common in real judges)
 - [ ] Sample test cases visible to candidates pre-submission; hidden ones only used server-side
+- [ ] The CSV format depends on the question's `question_type` (table below). One upload endpoint, one CSV header; the type decides how rows are validated
+- [ ] MCQ/THEORY have no test cases: UI hides the test case tab and the API returns `TEST_CASES_NOT_APPLICABLE`
+
+**Test Case CSV by Question Type** (uploaded per question, same endpoint for all types)
+
+Header (all types that use test cases): `input,expected_output,is_sample,weight`
+
+| Type | `input` | `expected_output` | `is_sample` / `weight` |
+|---|---|---|---|
+| DSA (existing) | stdin text, multi-line allowed (quoted cell) | exact stdout | optional; default `false` / `1` |
+| SQL | extra seed SQL (INSERTs run after the question's `schema_sql`); blank = use question data only | JSON `{"columns":["name","age"],"rows":[["Alice",30],["Bob",25]]}` | optional; default `false` / `1` |
+| MCQ, THEORY | not applicable (options and answers arrive with the question import, Module 5B) | | |
+
+Example SQL row (cells quoted because they contain commas/quotes):
+```
+input,expected_output,is_sample,weight
+"INSERT INTO emp VALUES (3,'Cara',40);","{""columns"":[""name""],""rows"":[[""Cara""]]}",true,1
+```
+Rules: `input` and `expected_output` are the existing columns and keep their current behavior for DSA; `is_sample` and `weight` are optional extras (drop them if the current importer lacks them and keep the defaults). SQL rows are rejected if `expected_output` is not valid JSON with `columns` and `rows`, or if `input` contains anything other than INSERT/UPDATE/DELETE. Column names compare case-insensitively; row order is ignored unless the question has `order_matters`.
 
 **Database Tables**
 - `test_cases` (id, question_id FK, input, expected_output, is_sample, weight, order_index, created_at)
@@ -363,7 +389,7 @@ Final order used below: **Foundation → Auth → User Mgmt → Contest → Ques
 - **Entities:** `TestCase`
 - **Repositories:** `TestCaseRepository` (with a method like `findByQuestionIdAndIsSampleTrue` for candidate-facing calls — **never** fetch all test cases in a candidate-facing code path)
 - **DTOs:** `CreateTestCaseRequest`, `TestCaseAdminResponse`, `TestCaseSampleResponse` (only sample ones, no `expected_output` even — candidates should only see input + their own actual output after a Run)
-- **Services:** `TestCaseService`, `TestCaseBulkUploadService`
+- **Services:** `TestCaseService`, `TestCaseBulkUploadService` (loads the question, then picks a `TestCaseRowValidator` by `question_type`: `DsaRowValidator` = current behavior, `SqlRowValidator` = rules above)
 - **Controllers:** `TestCaseController` (`/api/questions/{questionId}/test-cases/**`)
 - **Security Components:** Admin-only write; strict serialization boundary as above
 
@@ -397,8 +423,162 @@ Final order used below: **Foundation → Auth → User Mgmt → Contest → Ques
 - [ ] A question has a mix of sample + hidden test cases
 - [ ] API contract test confirms hidden test case data never appears in any candidate-accessible response
 - [ ] Bulk upload correctly parses and rejects malformed entries with a clear report
+- [ ] Existing DSA CSV uploads behave exactly as before; a SQL CSV with invalid `expected_output` JSON reports the row; uploading to an MCQ question returns `TEST_CASES_NOT_APPLICABLE`
 
 **Future Enhancements:** Test case file upload (large I/O via file references instead of inline text, for problems with big inputs), partial-credit weighting UI.
+
+---
+
+## Module 5A: Question Library
+
+**Purpose:** One global, evaluator-only question bank organized into subject folders, reusable in any contest (DSA, SQL, MCQ). Teachers stop re-making the same questions.
+
+**Design (keeps existing flow untouched):** a library question is a normal `questions` row with `contest_id = NULL` and a `subject_id`. Adding it to a contest **copies** it (question + test cases + MCQ options) into that contest with `source_question_id` pointing back. Sessions, submissions, results and test-case code keep working on contest-owned questions exactly as today, and later library edits can never change a running exam.
+
+**Functional Requirements**
+- [ ] Evaluators/Admin create subject folders (e.g. DSA, SQL, DBMS, Aptitude); folders are global, one shared list
+- [ ] Create a question inside a folder using the existing question forms (any type); add test cases with the existing Module 5 UI
+- [ ] Every evaluator sees every library question, with the author's name shown (name only); edit/delete by the author or Admin only
+- [ ] Candidates can never see the library
+- [ ] Contest window: **Add from Library** → pick folder → tick questions (multi-select) → confirm → copied into the contest. Reordering uses the existing reorder endpoint
+- [ ] Questions can still be created directly inside a contest (Module 4, unchanged)
+- [ ] "No test cases" badge on DSA/SQL questions (library and contest lists)
+
+**Database Tables**
+- `subjects` (id, name UNIQUE, created_by, created_at)
+- Uses `questions.subject_id` / `source_question_id` from the Module 4 migration (`source_question_id` is `ON DELETE SET NULL`, so deleting a library question never affects contests)
+
+**Backend Components**
+- **Entities:** `Subject` · **Repositories:** `SubjectRepository`, plus library queries on the existing `QuestionRepository` (`contest_id IS NULL`)
+- **DTOs:** `SubjectResponse`, `LibraryQuestionResponse` (admin view + `authorName`), `AddFromLibraryRequest` (`questionIds[]`)
+- **Services:** `SubjectService`, `QuestionLibraryService` (list/filter, `addToContest` = deep copy in one transaction, skips questions already copied into that contest); creation/update reuse `QuestionService`
+- **Controllers:** `LibraryController` (`/api/library/**`)
+- **Security Components:** whole controller `hasAnyRole('ADMIN','EVALUATOR')`; add-to-contest also needs the existing write permission on the target contest
+
+**Frontend Components**
+- **Pages:** `QuestionLibraryPage` (folder tree left, `DataTable` right, filters: type / difficulty / search)
+- **UI Components:** `SubjectFolderTree`, `LibraryPickerDialog` (used inside `ContestDetailPage` question tab); reuses `QuestionForm`, `DataTable`
+- **Hooks:** `useSubjects()`, `useLibraryQuestions(filters)`, `useAddFromLibrary()`
+
+**APIs**
+
+| Method | Endpoint | Description | Access |
+|---|---|---|---|
+| GET / POST | `/api/library/subjects` | List / create folder | Evaluator/Admin |
+| GET | `/api/library/questions?subjectId&type&q` | Browse (paged) | Evaluator/Admin |
+| POST | `/api/library/questions` | Create library question | Evaluator/Admin |
+| PUT / DELETE | `/api/library/questions/{id}` | Edit / delete | Author or Admin |
+| POST | `/api/contests/{contestId}/questions/from-library` | Copy selected questions into contest | Contest writer |
+
+**Sequence of Implementation**
+1. Migration pieces: nullable `contest_id`, `subjects`, new columns (if not already done in Module 4).
+2. `SubjectService` + folder UI.
+3. Library create/list/edit reusing `QuestionService`.
+4. `addToContest` deep copy + picker dialog.
+
+**Dependencies:** Modules 4 and 5.
+
+**Definition of Done**
+- [ ] Evaluator B sees Evaluator A's question with A's name and cannot edit it
+- [ ] Adding 5 library questions creates 5 independent contest copies with their test cases/options; editing the library afterwards does not change the contest copies
+- [ ] Any `/api/library/**` call as Candidate returns 403 (tested)
+- [ ] Existing DSA contest flow passes its old checks unchanged
+
+**Future Enhancements:** "Save to library" from inside a contest, tags, question versioning.
+
+---
+
+## Module 5B: Bulk Question Import (AI Prompt Workflow)
+
+**Purpose:** Turn a teacher's PDF or question list into library questions with one paste. We ship the prompt and the parser; the teacher's own LLM (Claude, Gemini, ChatGPT) does the conversion.
+
+**Functional Requirements**
+- [ ] **Import Questions** button inside a library folder opens a 3-step dialog: choose type → **Copy AI Prompt** → paste LLM output
+- [ ] Prompt template is type-specific (DSA / SQL / MCQ / THEORY) and states the exact JSON format to return
+- [ ] Preview before saving: parsed rows plus per-row errors; nothing is stored until Confirm
+- [ ] Valid rows import, invalid rows are reported with row number and reason (same `BulkImportResult` as Module 2)
+- [ ] DSA/SQL questions import **without test cases** (allowed; "No test cases" badge shows; contest publish enforces them, Module 3)
+- [ ] MCQ imports questions, all options and the correct answer(s) in one payload
+- [ ] **Test Case Prompt** button in `TestCaseManagerPage`: copies a prompt pre-filled with that question's title/description, choosing the template by `question_type` (DSA or SQL; hidden for MCQ/THEORY). The CSV it asks for is the Module 5 format, so no backend change beyond Module 5's type-aware validation
+
+**Test Case Prompt templates** (frontend strings; `{title}`, `{description}`, `{schema_sql}` are filled from the question)
+
+DSA:
+```
+Write 8 test cases for this problem as a CSV in a code block, header exactly:
+input,expected_output,is_sample,weight
+Rules: quote any cell with commas or line breaks; input is the exact stdin; expected_output is the exact stdout;
+first 2 rows is_sample=true, the rest false; weight=1; include edge cases (empty, minimum, maximum).
+Problem: {title}
+{description}
+```
+SQL:
+```
+Write 6 test cases for this SQL question as a CSV in a code block, header exactly:
+input,expected_output,is_sample,weight
+Rules: input = extra INSERT statements for this case (blank for the base data); expected_output = JSON
+{"columns":[...],"rows":[[...]]} for the correct query on schema + input; double the quotes inside CSV cells;
+first 2 rows is_sample=true; weight=1; vary the data so hardcoded answers fail.
+Question: {title}
+{description}
+Schema: {schema_sql}
+```
+
+**Import Format** (JSON array; tolerant of ```json fences)
+
+| Type | Fields |
+|---|---|
+| All | `title`, `description` (markdown), `difficulty` (EASY/MEDIUM/HARD), `points` |
+| DSA | + `timeLimitMs`, `memoryLimitKb` (optional, defaulted) |
+| SQL | + `schemaSql` (CREATE + INSERT script), `orderMatters` (bool) |
+| MCQ | + `options` (string array), `correct` (array of option numbers, 1-based) |
+| THEORY | + `modelAnswer` (optional) |
+
+Prompt template shape (one file per type, served by the backend so prompt and parser cannot drift):
+
+```
+Convert the questions in the text below into a JSON array. Return ONLY the JSON.
+Each item: {"title","description","difficulty","points","options":[...],"correct":[1]}
+- options: all answer choices in order; correct: 1-based numbers of the right option(s)
+- difficulty must be EASY, MEDIUM or HARD. Do not invent questions.
+TEXT:
+<paste your questions here>
+```
+
+**Database Tables:** None new.
+
+**Backend Components**
+- **Services:** generalize `CsvImportService` into a generic `BulkImportService` (parse fn + per-row validation → `BulkImportResult`), `QuestionImportParser` (JSON → existing `CreateQuestionRequest`, validated by the same Bean Validation rules), `PromptTemplateService` (templates as `resources/prompts/{type}.txt`)
+- **Limits:** max 1 MB / 200 questions per import
+- **Security Components:** Evaluator/Admin only
+
+**Frontend Components**
+- **UI Components:** `QuestionImportDialog` (3 steps), `CopyPromptButton`, `TestCasePromptButton` (static template string), reuses the import-result table from Module 2
+- **Hooks:** `useImportTemplate(type)`, `useImportQuestions()`
+
+**APIs**
+
+| Method | Endpoint | Description | Access |
+|---|---|---|---|
+| GET | `/api/library/import-template?type=` | Prompt text for that type | Evaluator/Admin |
+| POST | `/api/library/questions/import?dryRun=true\|false` | Body `{subjectId, type, payload}`; dry run = preview | Evaluator/Admin |
+
+**Sequence of Implementation**
+1. Define JSON format and parser with `dryRun`.
+2. Per-type prompt templates.
+3. Import dialog with preview.
+4. Test Case Prompt button.
+
+**Dependencies:** Module 5A.
+
+**Definition of Done**
+- [ ] Importing 20 mixed rows creates the valid ones and reports the bad ones by row number
+- [ ] Imported DSA/SQL questions carry no test cases and show the badge; MCQ import keeps options and correct answers exactly
+- [ ] Output from at least two real LLMs, using the copied prompt, imports without manual edits
+- [ ] Existing test-case bulk importer behaves exactly as before for DSA
+- [ ] A CSV produced by the DSA prompt and one by the SQL prompt each import without manual edits
+
+**Future Enhancements:** CSV/Excel direct import, import straight into a contest.
 
 ---
 
@@ -424,10 +604,10 @@ Final order used below: **Foundation → Auth → User Mgmt → Contest → Ques
 - **Security Components:** Candidate can only access their own session (ownership check, not just role check — this is a common real bug source: **object-level authorization**, not just role-based)
 
 **Frontend Components**
-- **Pages:** `AssessmentPage` (the main exam-taking screen — hosts the Monaco editor, question list, timer)
+- **Pages:** `AssessmentPage` (the main exam-taking screen — one timer, one question navigator, and a per-question panel chosen by `question_type`: Monaco (DSA), schema + SQL editor (SQL), options (MCQ), text box (THEORY))
 - **Hooks:** `useAssessmentSession(contestId)`, `useSessionTimer()` (client-side countdown synced against server `ends_at`, not counting independently)
 - **API Calls:** `sessionApi.start()`, `sessionApi.getStatus()`, `sessionApi.submit()`
-- **UI Components:** `CountdownTimer`, `QuestionNavigator` (sidebar list of questions with attempted/unattempted status)
+- **UI Components:** `CountdownTimer`, `QuestionNavigator` (sidebar list of all contest questions, any mix of types, with type icon and status: not visited / attempted / marked for review)
 
 **APIs**
 
@@ -520,7 +700,7 @@ Final order used below: **Foundation → Auth → User Mgmt → Contest → Ques
 - [ ] Submission history per candidate per question (they can submit multiple times; typically the **last** or **best** submission counts — decide and document this rule explicitly)
 
 **Database Tables**
-- `submissions` (id, session_id FK, question_id FK, candidate_id FK, language_id, source_code, submission_type, status, score, submitted_at)
+- `submissions` (id, session_id FK, question_id FK, candidate_id FK, language_id (nullable for MCQ/THEORY), source_code, answer_payload (JSONB, MCQ/THEORY only), submission_type, status, score, submitted_at)
 - `submission_test_case_results` (id, submission_id FK, test_case_id FK, status, actual_output, execution_time_ms, memory_used_kb)
 
 **Backend Components**
@@ -570,6 +750,98 @@ Final order used below: **Foundation → Auth → User Mgmt → Contest → Ques
 - [ ] Evaluator can view any candidate's submission with full test-case breakdown
 
 **Future Enhancements:** Code similarity/plagiarism detection between submissions, submission diffing across a candidate's own attempts.
+
+---
+
+## Module 8A: MCQ & Theory Questions
+
+**Purpose:** Exam-taking for MCQ/THEORY questions, which can sit in the same contest as DSA and SQL questions, reusing sessions (Module 6), submissions (Module 8) and evaluation (Module 9).
+
+**Functional Requirements**
+- [ ] One question at a time; radio buttons (checkboxes when a question has more than one correct answer)
+- [ ] Question palette like a test board: the shared `QuestionNavigator` shows a numbered grid for every question in the contest (any type) with states (not answered / answered / marked for review), live counts, Previous / Next, **Skip**, Clear, Mark for Review. A DSA/SQL question counts as answered once it has a Submit
+- [ ] Every change auto-saves; the last saved answer counts (same rule as Module 8)
+- [ ] Palette state is rebuilt from saved answers, so a browser refresh restores everything (Module 6 resume)
+- [ ] Final submit / auto-submit auto-scores MCQ: full points if the selected set equals the correct set (no negative marking in v1)
+- [ ] THEORY: text box, not auto-scored; evaluator scores it in the existing `EvaluationPanel` (Module 9)
+- [ ] Candidate payloads never include `is_correct` or `model_answer`
+
+**Database Tables:** None new. Answers go in `submissions.answer_payload` (`{selectedOptionIds, marked}` or `{text}`), type `SUBMIT`.
+
+**Backend Components**
+- **Services:** per-type strategy inside `ScoringService` (`DSA`/`SQL` = test-case weights as today, `MCQ` = option match, `THEORY` = pending manual score)
+- **DTOs:** `SaveAnswerRequest`, `McqQuestionCandidateView` (options without `is_correct`)
+- **APIs:** reuse `POST /api/submissions/submit` with `answerPayload`; one new read endpoint below
+- **Security Components:** same object-level session checks as Module 6/8
+
+**Frontend Components**
+- **Pages:** `AssessmentPage` switches the question panel by `question.question_type`, reusing `CountdownTimer` and `useAssessmentSession`
+- **UI Components:** `McqQuestionView`, `QuestionPalette` (the grid and counts part of `QuestionNavigator`), `TheoryAnswerBox`
+- **Hooks:** `useSaveAnswer()` (debounced), `useMyAnswers(contestId)`
+
+| Method | Endpoint | Description | Access |
+|---|---|---|---|
+| GET | `/api/contests/{contestId}/session/answers` | Own saved answers (restores palette) | Candidate |
+
+**Sequence of Implementation**
+1. `answer_payload` save path + `McqScoringStrategy`.
+2. MCQ question view + palette.
+3. Refresh/resume via `useMyAnswers`.
+4. THEORY box and evaluator display.
+
+**Dependencies:** Modules 5A (MCQ questions exist), 6, 8.
+
+**Definition of Done**
+- [ ] A contest with 1 DSA + 1 SQL + 2 MCQ questions is navigable in any order from one palette, and one final submit scores all of them
+- [ ] Refresh mid-exam restores answers and review marks
+- [ ] Auto-submit on a short test contest scores MCQ correctly
+- [ ] Test asserts candidate-facing responses contain no `is_correct`
+- [ ] Theory answer appears for the evaluator and a score override updates the leaderboard
+
+**Future Enhancements:** negative marking, section-wise timers, option shuffling.
+
+---
+
+## Module 8B: SQL Questions
+
+**Purpose:** HackerRank/LeetCode-style SQL questions (usable alongside DSA and MCQ in one contest): the candidate sees the schema, writes a query, runs it on sample data, then submits against hidden data.
+
+**Design (no new engine):** reuse Judge0 (its SQLite language; confirm the language id via `GET /languages` on your instance), `test_cases`, `submissions`, the Redis queue and `ScoringService`. Execution script = `schema_sql` + the test case's optional extra seed SQL + the candidate's query.
+
+**Functional Requirements**
+- [ ] SQL question holds `schema_sql` (tables + seed data) shown to candidates; `order_matters` flag per question
+- [ ] SQL test case reuses the existing table: `input` = optional extra seed SQL (different data defeats hardcoded answers), `expected_output` = expected rows. Sample/hidden flags work as in Module 5
+- [ ] **Run** = sample test cases only, shows result rows; **Submit** = all test cases, weighted scoring as today
+- [ ] Result comparison ignores row order unless `order_matters`; compares normalized rows (`SqlResultComparator`)
+- [ ] Only a single `SELECT` statement is accepted (validated server-side) to block DDL and CLI dot-commands; Judge0's sandbox contains everything else
+- [ ] A SQL question always runs as SQL; contest `allowed_languages` applies to DSA questions only
+
+**Database Tables:** None new (`schema_sql`, `order_matters` come from the Module 4 migration).
+
+**Backend Components**
+- **Services:** `SqlExecutionAdapter` inside `CodeExecutionService` (builds the script, picks the SQL language id), `SqlResultComparator` (→ normalized `ExecutionResult`), `SqlQueryValidator`
+- Everything downstream (queue, submissions, scoring, results) unchanged
+
+**Frontend Components**
+- **Pages:** `AssessmentPage` SQL panel: problem + schema panel left, Monaco (SQL mode) + result table right
+- **UI Components:** reuses `CodeEditorPanel` (language locked), `TestCaseResultPanel`; adds `SqlResultTable`
+
+**Sequence of Implementation**
+1. Prove a hardcoded script in Judge0's SQLite language via curl.
+2. `SqlExecutionAdapter` + `SqlResultComparator` + validator.
+3. SQL panel in `AssessmentPage`.
+4. Concurrency check through the existing queue.
+
+**Dependencies:** Modules 5A/5B (SQL questions and test cases), 7, 8.
+
+**Definition of Done**
+- [ ] Correct query passes; wrong rows return Wrong Answer with a row diff
+- [ ] Row order ignored unless `order_matters`
+- [ ] Multi-statement / DDL submissions are rejected before reaching Judge0
+- [ ] Hidden seed data never appears in candidate responses (absence test)
+- [ ] 10+ concurrent SQL submissions complete through the queue
+
+**Future Enhancements:** a PostgreSQL/MySQL sandbox for dialect-specific questions, query-plan or performance checks.
 
 ---
 
@@ -640,12 +912,11 @@ Final order used below: **Foundation → Auth → User Mgmt → Contest → Ques
 
 **Functional Requirements**
 - [ ] Score distribution chart per contest
-- [ ] Per-question pass rate / difficulty validation (are your "easy" questions actually easy?)
+- [ ] Per-question pass rate / difficulty validation (are your "easy" questions actually easy? For MCQ, pass rate = % answered correctly)
 - [ ] Time-taken analysis
-- [ ] Flagged-candidate summary (ties into Module 13's proctoring events)
 
 **Database Tables**
-- No new tables ideally — this module reads/aggregates from `submissions`, `results`, `assessment_sessions`, `proctoring_events` (Module 13) via optimized queries/views. Consider a few native SQL views (`contest_analytics_view`) for heavier aggregations rather than pulling raw rows into Java and computing in-memory.
+- No new tables ideally — this module reads/aggregates from `submissions`, `results`, `assessment_sessions` via optimized queries/views. Consider a few native SQL views (`contest_analytics_view`) for heavier aggregations rather than pulling raw rows into Java and computing in-memory.
 
 **Backend Components**
 - **Entities:** None new (read-only aggregation layer); optionally JPA-mapped read-only entities/`@Immutable` views
@@ -668,14 +939,14 @@ Final order used below: **Foundation → Auth → User Mgmt → Contest → Ques
 | GET | `/api/contests/{contestId}/analytics/overview` | Score distribution, averages | Admin/Evaluator |
 | GET | `/api/contests/{contestId}/analytics/questions` | Per-question stats | Admin/Evaluator |
 
-**Database Relationships:** Read-only aggregation across `submissions`, `results`, `assessment_sessions`, `proctoring_events`.
+**Database Relationships:** Read-only aggregation across `submissions`, `results`, `assessment_sessions`.
 
 **Sequence of Implementation**
 1. Define exactly which metrics matter (don't over-build — 3-4 solid charts beat 10 shallow ones for a viva demo).
 2. Write and test the aggregate queries directly in SQL first (faster iteration than through JPA), then wrap in `AnalyticsRepository`.
 3. Build endpoints + frontend charts.
 
-**Dependencies:** Modules 8 & 9 (needs real submission/result data to aggregate); ideally built after Module 13 exists so proctoring analytics can be included, or built in two passes.
+**Dependencies:** Modules 8 & 9 (needs real submission/result data to aggregate).
 
 **Definition of Done**
 - [ ] Dashboard renders correctly for a contest with real (or seeded test) data
@@ -685,178 +956,13 @@ Final order used below: **Foundation → Auth → User Mgmt → Contest → Ques
 
 ---
 
-## Module 11: WebSocket Service
-
-**Purpose:** Real-time layer for live timers, candidate presence, and event notifications — the foundation Module 13 (Live Monitoring) builds on.
-
-**Functional Requirements**
-- [ ] Candidate presence: who is currently active in a contest
-- [ ] Server-push notifications: session about to expire, contest state change, manual evaluation published
-- [ ] Admin dashboard receives live updates without polling
-
-**Database Tables:** None — this is a transport/session layer. Presence state cached in Redis (`contest:{id}:active-candidates` set), not persisted to Postgres.
-
-**Backend Components**
-- **Entities:** None
-- **Repositories:** None (Redis operations via `RedisTemplate`, not JPA)
-- **DTOs:** `WebSocketEvent` (generic envelope: `{ type, payload, timestamp }`), specific event payloads (`SessionExpiringEvent`, `CandidateJoinedEvent`, `ContestStatusChangedEvent`)
-- **Services:** `WebSocketPresenceService` (track connect/disconnect in Redis), `NotificationBroadcastService` (pushes events to relevant STOMP topics)
-- **Controllers:** N/A REST — instead: `WebSocketConfig` (`@EnableWebSocketMessageBroker`, STOMP endpoint registration, e.g. `/ws`), `@MessageMapping`-annotated handler for candidate presence pings
-- **Security Components:** WebSocket handshake must validate the JWT (via a handshake interceptor) — don't leave the socket endpoint unauthenticated just because it's a different protocol
-- **Configuration:** STOMP broker relay config, topic naming convention (e.g. `/topic/contest/{id}/presence`, `/topic/contest/{id}/events`)
-
-**Frontend Components**
-- **Pages:** No dedicated page — a shared connection used across `AssessmentPage` and `LiveMonitoringPage`
-- **Hooks:** `useWebSocket()` (connection lifecycle), `useContestPresence(contestId)`, `useContestEvents(contestId)`
-- **API Calls:** N/A (STOMP client, e.g. `@stomp/stompjs` + `sockjs-client`)
-- **UI Components:** `ConnectionStatusIndicator`, `LiveNotificationToast`
-
-**APIs (WebSocket topics, not REST)**
-
-| Destination | Direction | Description |
-|---|---|---|
-| `/ws` (handshake) | Client → Server | Connect, JWT validated at handshake |
-| `/app/contest/{id}/join` | Client → Server | Announce presence |
-| `/topic/contest/{id}/presence` | Server → Client | Broadcast active candidate list |
-| `/topic/contest/{id}/events` | Server → Client | Session/contest state change notifications |
-
-**Database Relationships:** N/A
-
-**Sequence of Implementation**
-1. Basic `WebSocketConfig` + one test topic (e.g., broadcast a timestamp every 5s) to prove connectivity end-to-end before building real features.
-2. JWT handshake interceptor — secure it before adding real data.
-3. Presence tracking via Redis.
-4. Event broadcasting for session expiry warnings and contest state changes (hook into Module 6's scheduler and Module 3's scheduler to *also* emit WebSocket events, not just update the DB silently).
-
-**Dependencies:** Module 1 (JWT for handshake auth), Redis running.
-
-**Definition of Done**
-- [ ] Two browser sessions joining the same contest see each other in a live presence list
-- [ ] A session-expiry-warning event reaches the candidate's browser within a couple seconds of being triggered server-side
-- [ ] Unauthenticated WebSocket connection attempts are rejected
-
-**Future Enhancements:** Typing/activity indicators, chat between candidate and evaluator for exam-time queries.
-
----
-
-## Module 12: WebRTC Signaling Service
-
-**Purpose:** Enable live webcam + screen share streaming from Candidate to Admin/Evaluator, **with no recording or storage** — pure live signaling.
-
-**Functional Requirements**
-- [ ] Candidate's browser captures webcam (`getUserMedia`) and screen (`getDisplayMedia`)
-- [ ] WebRTC peer connection established between Candidate and monitoring Admin/Evaluator, brokered by your signaling server
-- [ ] Signaling exchanges SDP offers/answers and ICE candidates — **your backend never touches the actual media stream**, only the connection metadata
-- [ ] Multiple evaluators can potentially observe the same candidate stream (fan-out) — note as a scaling consideration, simplest version is 1 evaluator : 1 candidate observation
-
-**Database Tables:** None — signaling is ephemeral, no persistence required (explicitly no recording per your requirements).
-
-**Backend Components**
-- **Entities:** None
-- **Repositories:** None
-- **DTOs:** `SignalMessage` (`{ type: OFFER|ANSWER|ICE_CANDIDATE, senderId, targetId, payload }`)
-- **Services:** `WebRTCSignalingService` (routes signaling messages between the correct candidate/evaluator pair, using the same STOMP infrastructure from Module 11 or a dedicated `/ws/signaling` handler)
-- **Controllers:** Extends `WebSocketConfig`'s message mapping — `@MessageMapping("/signal/{targetUserId}")`
-- **Security Components:** Verify sender is either the candidate whose session it is, or an Evaluator/Admin assigned to that contest — **critical**: without this check, anyone could subscribe to any candidate's stream
-- **Configuration:** STUN server config (public STUN like Google's is fine since you're not recording; TURN server only needed if you hit NAT traversal issues on your self-hosted network — note this as a possible gotcha since you're on a single Ubuntu server/laptop, likely same-network testing, so TURN probably isn't even needed for your demo)
-
-**Frontend Components**
-- **Pages:** No separate page — webcam capture happens inside `AssessmentPage` (candidate side, silent background operation), viewing happens inside `LiveMonitoringPage` (Module 13, evaluator side)
-- **Hooks:** `useWebRTCBroadcast()` (candidate side: capture + create offer), `useWebRTCViewer(candidateId)` (evaluator side: receive offer, create answer, render stream)
-- **API Calls:** N/A (STOMP signaling channel)
-- **UI Components:** `WebcamPreview` (small local check on candidate side, "your camera is being monitored" — an honest, visible indicator matters ethically and will likely be asked about in viva), `RemoteStreamViewer` (evaluator side `<video>` element bound to the received `MediaStream`)
-
-**APIs (signaling channel, not REST)**
-
-| Destination | Direction | Description |
-|---|---|---|
-| `/app/signal/{targetUserId}` | Client → Server | Send SDP offer/answer or ICE candidate |
-| `/topic/signal/{userId}` (or user-specific queue) | Server → Client | Deliver signaling message to intended recipient |
-
-**Database Relationships:** N/A
-
-**Sequence of Implementation**
-1. Prove basic WebRTC works **without your signaling server first** — two browser tabs manually exchanging SDP via console/copy-paste — to isolate WebRTC issues from signaling-server issues while learning.
-2. Build `WebRTCSignalingService` message routing using existing WebSocket infra.
-3. Candidate-side capture + offer creation.
-4. Evaluator-side viewer + answer handling.
-5. Authorization check: evaluator can only request a stream from a candidate in a contest they're assigned to monitor.
-6. Test screen share (`getDisplayMedia`) alongside webcam — decide if it's one combined stream or two separate peer connections (two is simpler to reason about, slightly more overhead).
-
-**Dependencies:** Module 11 (WebSocket infrastructure), Module 6 (need active assessment sessions to monitor).
-
-**Definition of Done**
-- [ ] Evaluator can view a live webcam feed from a candidate in real time (a few seconds of latency is acceptable)
-- [ ] Screen share stream also viewable
-- [ ] No media is ever written to disk or database anywhere in the flow (explicitly verify — check Judge0/logs/Redis for accidental buffering)
-- [ ] Unauthorized evaluator (not assigned to that contest) cannot subscribe to a candidate's stream
-
-**Future Enhancements:** Multi-evaluator fan-out via an SFU (e.g., mediasoup) if you ever need >1 viewer per stream at scale — explicitly out of scope for this project, worth one line in your report's "future work."
-
----
-
-## Module 13: Live Monitoring Dashboard
-
-**Purpose:** The Admin/Evaluator-facing UI that ties together presence (Module 11), live streams (Module 12), and behavioral flags into one monitoring view.
-
-**Functional Requirements**
-- [ ] Grid/list view of all currently active candidates in a contest
-- [ ] Click a candidate to open their live webcam + screen share
-- [ ] Behavioral flags: tab-switch, copy-paste into editor, fullscreen exit, dev-tools open — logged and shown as a timeline per candidate
-- [ ] Filter/sort candidates by "most flagged"
-
-**Database Tables**
-- `proctoring_events` (id, session_id FK, event_type, occurred_at, metadata JSONB)
-
-**Backend Components**
-- **Entities:** `ProctoringEvent`
-- **Repositories:** `ProctoringEventRepository`
-- **DTOs:** `LogProctoringEventRequest`, `ProctoringEventResponse`, `CandidateMonitoringSummary` (active status + flag count)
-- **Services:** `ProctoringEventService` (log events, query timeline per session), aggregation method reused by Module 10's analytics
-- **Controllers:** `ProctoringEventController` (`/api/sessions/{sessionId}/proctoring-events/**`)
-- **Security Components:** Candidate can only POST events for their **own** active session; Admin/Evaluator read-only, scoped to contests they're assigned to
-
-**Frontend Components**
-- **Pages:** `LiveMonitoringPage` (Admin/Evaluator)
-- **Hooks:** `useActiveCandidates(contestId)` (built on Module 11's presence), `useCandidateStream(candidateId)` (built on Module 12), `useProctoringEvents(sessionId)`, `useLogProctoringEvent()` (candidate side — fires on `visibilitychange`, `copy`/`paste`, `fullscreenchange`, and a best-effort dev-tools-open heuristic)
-- **API Calls:** `proctoringApi.*`
-- **UI Components:** `CandidateGrid`, `CandidateMonitorCard` (thumbnail + flag count badge), `LiveStreamModal`, `ProctoringTimeline`
-
-**APIs**
-
-| Method | Endpoint | Description | Access |
-|---|---|---|---|
-| POST | `/api/sessions/{sessionId}/proctoring-events` | Log a behavioral event | Candidate (own session only) |
-| GET | `/api/sessions/{sessionId}/proctoring-events` | Timeline for one candidate | Admin/Evaluator |
-| GET | `/api/contests/{contestId}/monitoring` | Active candidates + flag summary | Admin/Evaluator |
-
-**Database Relationships**
-- `proctoring_events.session_id` → `assessment_sessions.id`
-
-**Sequence of Implementation**
-1. `ProctoringEvent` entity + logging endpoint; wire up frontend event listeners (`visibilitychange` etc.) on the candidate side first — this is independent of WebRTC and can be built/tested in isolation.
-2. `LiveMonitoringPage` shell using Module 11's presence data (list of who's active) — works even before WebRTC is wired in.
-3. Integrate Module 12's stream viewer into the monitoring page.
-4. Flag-count aggregation + sort/filter.
-
-**Dependencies:** Modules 6, 11, 12.
-
-**Definition of Done**
-- [ ] Candidate switching tabs during an active session generates a visible flag on the Admin dashboard within a couple seconds
-- [ ] Admin can view live video for any active candidate in a contest they administer
-- [ ] Flag counts correctly aggregate per candidate per contest
-
-**Future Enhancements:** Configurable flag severity/weighting, automatic session pause on repeated severe flags (careful — this is a significant behavior change, treat as clearly optional/future).
-
----
-
 ## Module 14: Deployment
 
 **Purpose:** Package and run the entire system reliably on your self-hosted Ubuntu server.
 
 **Functional Requirements**
 - [ ] Single `docker-compose.yml` orchestrating: Spring Boot app, PostgreSQL, Redis, Judge0 (+ its own sub-services), Nginx
-- [ ] Nginx reverse-proxies `/api` and `/ws` to Spring Boot, serves built React static assets directly, handles TLS if you set up a domain/cert (optional for a local demo)
+- [ ] Nginx reverse-proxies `/api` to Spring Boot, serves built React static assets directly, handles TLS if you set up a domain/cert (optional for a local demo)
 - [ ] Environment-specific config via `.env` file, never committed secrets
 - [ ] Database migrations via Flyway or Liquibase (**do this from the start**, not retrofitted — you'll thank yourself when your schema inevitably changes across 17 modules)
 
@@ -866,7 +972,7 @@ Final order used below: **Foundation → Auth → User Mgmt → Contest → Ques
 - `Dockerfile`/build config for the React app (Vite build → static files served by Nginx)
 - `nginx.conf` (routing rules, gzip, basic security headers)
 - Judge0's own official `docker-compose` (included/composed alongside yours — don't reinvent their setup)
-- Flyway migration scripts (`V1__init_schema.sql`, `V2__add_proctoring_events.sql`, etc. — one per meaningful schema change, mapping roughly to your module sequence)
+- Flyway migration scripts (`V1__init_schema.sql`, `V2__question_library_and_types.sql`, etc. — one per meaningful schema change, mapping roughly to your module sequence)
 - `.env.example` committed to git, real `.env` gitignored
 
 **Sequence of Implementation**
@@ -893,9 +999,9 @@ Final order used below: **Foundation → Auth → User Mgmt → Contest → Ques
 **Purpose:** Verify the system as a whole, not just individual modules — this is distinct from the unit tests each module already includes in its own Definition of Done.
 
 **Functional Requirements**
-- [ ] End-to-end test: Admin creates contest → assigns candidates → candidates take exam concurrently → auto-submit → evaluation → publish → analytics reflect real data
+- [ ] End-to-end test (one contest mixing DSA, SQL and MCQ questions): Admin creates contest → assigns candidates → candidates take exam concurrently → auto-submit → evaluation → publish → analytics reflect real data
 - [ ] Load test: simulate N concurrent candidates submitting code around the same time, verify Judge0 queue holds up
-- [ ] Security test pass: verify object-level authorization holes are closed (candidate can't access another candidate's session/submission by guessing IDs), hidden test cases never leak, WebRTC streams can't be joined by unauthorized users
+- [ ] Security test pass: verify object-level authorization holes are closed (candidate can't access another candidate's session/submission by guessing IDs), hidden test cases never leak, candidates can never reach library endpoints or MCQ answer keys
 
 **Components**
 - A test script/harness (can be a simple Node/Python script or Postman/Newman collection) simulating multiple concurrent candidate sessions
@@ -905,7 +1011,7 @@ Final order used below: **Foundation → Auth → User Mgmt → Contest → Ques
 **Sequence of Implementation**
 1. Write the full concurrent-candidate simulation script early enough to catch integration issues before deployment week, not after.
 2. Run it against a contest with 10-20 simulated candidates.
-3. Fix issues found (likely candidates: race conditions in session expiry, Judge0 queue backpressure, WebSocket reconnection edge cases).
+3. Fix issues found (likely candidates: race conditions in session expiry, Judge0 queue backpressure, duplicate answer saves on reconnect).
 4. Security checklist pass — go through Section "Security Components" of every module above and verify explicitly.
 
 **Dependencies:** All prior modules functionally complete.
@@ -927,8 +1033,8 @@ Final order used below: **Foundation → Auth → User Mgmt → Contest → Ques
 - [ ] API documentation (Springdoc/OpenAPI/Swagger — auto-generated from your controllers, minimal extra effort, looks very professional)
 - [ ] Module-by-module writeup in your report (this document is most of that work already done)
 - [ ] Judge0 integration deep-dive section (your strongest technical differentiator — explain the queueing, the normalized `ExecutionResult` abstraction, and how you handle failure modes)
-- [ ] Security section (JWT + refresh rotation, object-level authorization, hidden test case isolation, WebRTC authorization) — examiners specifically like seeing security addressed as its own topic
-- [ ] Known limitations / future work section (no video recording, no AI-based cheating detection, single-server deployment, no TURN server — being upfront about scope boundaries reads as maturity, not weakness)
+- [ ] Security section (JWT + refresh rotation, object-level authorization, hidden test case isolation, answer-key and library isolation) — examiners specifically like seeing security addressed as its own topic
+- [ ] Known limitations / future work section (no proctoring or video, no AI-based cheating detection, single-server deployment, SQL questions limited to the SQLite dialect — being upfront about scope boundaries reads as maturity, not weakness)
 - [ ] Rehearsed demo script (pick one realistic end-to-end scenario, time it, know exactly what to click)
 
 **Dependencies:** All other modules complete.
@@ -952,7 +1058,9 @@ assessment_sessions ──< submissions >── questions
 submissions ──< submission_test_case_results >── test_cases
 submissions ──< manual_evaluations >── users (evaluator)
 contests ──< results >── users (candidate)
-assessment_sessions ──< proctoring_events
+subjects ──< questions            (library questions: contest_id NULL)
+questions ──< questions           (source_question_id: contest copy → library original)
+questions ──< mcq_options
 users ──< audit_log
 ```
 
