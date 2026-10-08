@@ -1,0 +1,30 @@
+```json
+[
+  {
+    "title": "Java Memory Management",
+    "description": "Where are objects allocated in Java?",
+    "difficulty": "EASY",
+    "points": 5,
+    "options": [
+      "Stack memory",
+      "Heap memory",
+      "Metaspace",
+      "Native memory"
+    ],
+    "correct": [2]
+  },
+  {
+    "title": "HTTP Status Codes",
+    "description": "Which HTTP status code represents 'Created'?",
+    "difficulty": "EASY",
+    "points": 5,
+    "options": [
+      "200 OK",
+      "201 Created",
+      "204 No Content",
+      "400 Bad Request"
+    ],
+    "correct": [2]
+  }
+]
+```

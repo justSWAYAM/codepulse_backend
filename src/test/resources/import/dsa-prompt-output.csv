@@ -1,0 +1,9 @@
+input,expected_output,is_sample,weight
+"1 2",3,true,10
+"5 7",12,true,10
+"-1 1",0,false,15
+"100 200",300,false,15
+"0 0",0,false,10
+"-5 -5",-10,false,10
+"10 -3",7,false,15
+"999 1",1000,false,15

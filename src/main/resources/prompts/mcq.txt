@@ -1,0 +1,13 @@
+Convert the multiple-choice questions in the text below into a JSON array. Return ONLY the JSON (one code block, no commentary).
+Each item must look like:
+{"title":"Short question title","description":"Full question text in Markdown","difficulty":"EASY","points":5,"options":["Option A text","Option B text","Option C text","Option D text"],"correct":[2]}
+Rules:
+- title: a short label for the question.
+- description: the full question text in Markdown. Escape line breaks as \n inside the JSON string.
+- options: all answer choices in their original order, without the "A)", "B)" labels.
+- correct: the 1-based numbers of the right option(s), e.g. [2], or [1,3] when several are correct.
+- difficulty must be exactly EASY, MEDIUM or HARD.
+- points: a positive whole number; use the marks given in the text, otherwise 5.
+- Do not invent questions that are not in the text. If an answer is not given, work out the correct option.
+TEXT:
+<paste your questions here>

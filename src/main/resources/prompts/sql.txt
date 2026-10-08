@@ -1,0 +1,12 @@
+Convert the SQL questions in the text below into a JSON array. Return ONLY the JSON (one code block, no commentary).
+Each item must look like:
+{"title":"Question name","description":"Full question in Markdown","difficulty":"EASY","points":10,"schemaSql":"CREATE TABLE emp (id INTEGER, name TEXT, age INTEGER); INSERT INTO emp VALUES (1,'Alice',30);","orderMatters":false}
+Rules:
+- description: the question in Markdown; describe the tables in words and state exactly what the query must return. Escape line breaks as \n inside the JSON string.
+- schemaSql: one SQLite-compatible script that creates every table the question uses (CREATE TABLE ...) and inserts sample rows (INSERT INTO ...). End every statement with a semicolon. Do NOT include the answer query.
+- orderMatters: true only if the question requires a specific row order (for example "sorted by ..."); otherwise false.
+- difficulty must be exactly EASY, MEDIUM or HARD.
+- points: a positive whole number; use the marks given in the text, otherwise 10.
+- Do NOT include test cases. Do not invent questions that are not in the text.
+TEXT:
+<paste your questions here>

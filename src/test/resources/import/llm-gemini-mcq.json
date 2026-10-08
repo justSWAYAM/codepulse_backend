@@ -1,0 +1,30 @@
+```json
+[
+  {
+    "title": "SQL Primary Key",
+    "description": "Which of the following is true about a primary key constraint in SQL?",
+    "difficulty": "EASY",
+    "points": 5,
+    "options": [
+      "It allows NULL values",
+      "A table can have multiple primary keys",
+      "It uniquely identifies each record in a table and cannot be NULL",
+      "It is identical to a foreign key"
+    ],
+    "correct": [3]
+  },
+  {
+    "title": "Git Branching",
+    "description": "Which command creates a new branch and switches to it in modern Git?",
+    "difficulty": "MEDIUM",
+    "points": 5,
+    "options": [
+      "git branch new-feature",
+      "git switch -c new-feature",
+      "git merge new-feature",
+      "git commit -b new-feature"
+    ],
+    "correct": [2]
+  }
+]
+```

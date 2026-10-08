@@ -1,0 +1,12 @@
+```json
+[
+  {
+    "title": "Active Customers Count",
+    "description": "Write a SQL query that counts the number of active customers.",
+    "difficulty": "EASY",
+    "points": 10,
+    "schemaSql": "CREATE TABLE customers (id INTEGER PRIMARY KEY, is_active BOOLEAN); INSERT INTO customers VALUES (1, true), (2, false), (3, true);",
+    "orderMatters": false
+  }
+]
+```

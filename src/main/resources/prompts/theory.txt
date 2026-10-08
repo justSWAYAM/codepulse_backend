@@ -1,0 +1,11 @@
+Convert the theory questions in the text below into a JSON array. Return ONLY the JSON (one code block, no commentary).
+Each item must look like:
+{"title":"Short question title","description":"Full question text in Markdown","difficulty":"MEDIUM","points":10,"modelAnswer":"Ideal answer or marking scheme"}
+Rules:
+- description: the full question text in Markdown. Escape line breaks as \n inside the JSON string.
+- modelAnswer: include only if the text provides an answer or marking scheme; otherwise leave this field out.
+- difficulty must be exactly EASY, MEDIUM or HARD.
+- points: a positive whole number; use the marks given in the text, otherwise 10.
+- Do not invent questions that are not in the text.
+TEXT:
+<paste your questions here>

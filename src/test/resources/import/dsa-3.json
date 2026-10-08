@@ -1,0 +1,26 @@
+[
+  {
+    "title": "Two Sum",
+    "description": "Given an array of integers nums and an integer target, return indices of the two numbers such that they add up to target.",
+    "difficulty": "EASY",
+    "points": 10,
+    "timeLimitMs": 2000,
+    "memoryLimitKb": 262144
+  },
+  {
+    "title": "Reverse Linked List",
+    "description": "Given the head of a singly linked list, reverse the list, and return the reversed list.",
+    "difficulty": "EASY",
+    "points": 10,
+    "timeLimitMs": 2000,
+    "memoryLimitKb": 262144
+  },
+  {
+    "title": "LRU Cache",
+    "description": "Design a data structure that follows the constraints of a Least Recently Used (LRU) cache.",
+    "difficulty": "MEDIUM",
+    "points": 15,
+    "timeLimitMs": 3000,
+    "memoryLimitKb": 262144
+  }
+]

@@ -1,0 +1,12 @@
+Convert the coding problems in the text below into a JSON array. Return ONLY the JSON (one code block, no commentary).
+Each item must look like:
+{"title":"Problem name","description":"Full problem statement in Markdown","difficulty":"MEDIUM","points":10,"timeLimitMs":2000,"memoryLimitKb":262144}
+Rules:
+- title: a short problem name.
+- description: the full statement in Markdown: story, input format, output format, constraints, and sample input/output. Escape line breaks as \n inside the JSON string.
+- difficulty must be exactly EASY, MEDIUM or HARD.
+- points: a positive whole number; use the marks given in the text, otherwise 10.
+- timeLimitMs (milliseconds) and memoryLimitKb (kilobytes): include them only if the text states limits; otherwise leave both out.
+- Do NOT include test cases. Do not invent problems that are not in the text.
+TEXT:
+<paste your problems here>

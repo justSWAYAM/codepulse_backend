@@ -1,0 +1,18 @@
+[
+  {
+    "title": "Find Employees in IT",
+    "description": "Write a query to find all employees working in the IT department.",
+    "difficulty": "EASY",
+    "points": 10,
+    "schemaSql": "CREATE TABLE employees (id INTEGER PRIMARY KEY, name TEXT, department TEXT); INSERT INTO employees VALUES (1, 'Alice', 'IT'), (2, 'Bob', 'HR');",
+    "orderMatters": false
+  },
+  {
+    "title": "Highest Salary",
+    "description": "Write a query to find the employee with the highest salary ordered by salary desc.",
+    "difficulty": "MEDIUM",
+    "points": 10,
+    "schemaSql": "CREATE TABLE salaries (emp_id INTEGER, amount INTEGER); INSERT INTO salaries VALUES (1, 5000), (2, 7000);",
+    "orderMatters": true
+  }
+]

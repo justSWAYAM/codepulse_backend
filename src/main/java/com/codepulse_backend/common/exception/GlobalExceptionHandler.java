@@ -92,6 +92,14 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.BAD_REQUEST, ex.getCode(), ex.getMessage(), req);
     }
 
+    @ExceptionHandler(com.codepulse_backend.library.imports.exception.ImportException.class)
+    public ResponseEntity<ApiResponse<Void>> handleImport(
+            com.codepulse_backend.library.imports.exception.ImportException ex, HttpServletRequest req) {
+        HttpStatus status = com.codepulse_backend.common.exception.ErrorCode.IMPORT_PAYLOAD_TOO_LARGE.name().equals(ex.getCode())
+                ? HttpStatus.PAYLOAD_TOO_LARGE : HttpStatus.BAD_REQUEST;
+        return build(status, ex.getCode(), ex.getMessage(), req);
+    }
+
     // ?sort=unknownField, or a request to an upload endpoint that is not multipart
     @ExceptionHandler({
             PropertyReferenceException.class,

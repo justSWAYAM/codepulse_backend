@@ -1,0 +1,7 @@
+input,expected_output,is_sample,weight
+"INSERT INTO t VALUES (1);","{""columns"":[""id""],""rows"":[[1]]}",true,15
+"INSERT INTO t VALUES (2);","{""columns"":[""id""],""rows"":[[2]]}",true,15
+"INSERT INTO t VALUES (3);","{""columns"":[""id""],""rows"":[[3]]}",false,20
+"INSERT INTO t VALUES (4);","{""columns"":[""id""],""rows"":[[4]]}",false,20
+"INSERT INTO t VALUES (5);","{""columns"":[""id""],""rows"":[[5]]}",false,15
+"INSERT INTO t VALUES (6);","{""columns"":[""id""],""rows"":[[6]]}",false,15
